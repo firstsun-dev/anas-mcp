@@ -8,6 +8,7 @@
 - [x] Add project instructions and baseline OpenSpec documents.
 - [x] Add `docs/credentials.md` with the Secrets Store first credential policy.
 - [x] Record Cloudflare Access Managed OAuth as the production `/mcp` authentication decision in `openspec/changes/add-cloudflare-access-auth/`.
+- [x] Record `firstsun-dev/.github` reusable Cloudflare Worker CI/CD as the deployment decision in `openspec/changes/use-centralized-cf-worker-ci/`.
 
 ## Credential platform
 - [ ] Create or select the production Cloudflare Secrets Store used by `anas-mcp`.
@@ -52,10 +53,13 @@
 - [ ] Configure default-deny Access policy with explicit allowed Firstsun identities/groups.
 - [ ] Verify ChatGPT and MCP Inspector can authenticate through Access without a manually pasted shared bearer token.
 - [ ] Do not add `OAUTH_KV`, D1, Durable Objects, or Worker-managed OAuth token state solely for MCP authentication.
-- [ ] Prefer workload identity/OIDC for CI-to-Cloudflare authentication where supported; otherwise document the protected CI bootstrap-secret exception and least-privilege scope.
+- [ ] Execute the centralized deployment tasks in `openspec/changes/use-centralized-cf-worker-ci/tasks.md`.
+- [ ] Use a thin caller for `firstsun-dev/.github/.github/workflows/_cf-worker-template.yml`; do not duplicate Cloudflare deploy/version/revert logic in this repository.
+- [ ] Verify npm/package-manager compatibility with the current shared workflow before enabling deploys.
+- [ ] Configure least-privilege Cloudflare CI bootstrap credentials in the protected GitHub Actions mechanism required by the shared workflow.
 - [ ] Configure production domain/route.
-- [ ] Add CI checks for `npm run check`.
-- [ ] Validate the deployed `/mcp` endpoint with MCP Inspector.
+- [ ] Route `npm run check` or the final verified equivalent through the centralized CI pipeline.
+- [ ] Validate the deployed `/mcp` endpoint with MCP Inspector after deployment is actually enabled.
 
 ## Verification evidence
-Bootstrap repository structure and documentation were created on 2026-09-08. The Secrets Store first credential policy and Cloudflare Access Managed OAuth authentication decision were recorded on 2026-09-08. Cloudflare dashboard configuration, runtime/typecheck verification, and end-to-end ChatGPT authentication remain pending until actually executed.
+Bootstrap repository structure and documentation were created on 2026-09-08. The Secrets Store first credential policy, Cloudflare Access Managed OAuth authentication decision, and centralized `firstsun-dev/.github` deployment decision were recorded on 2026-09-08. Cloudflare dashboard configuration, package-manager compatibility, caller workflow activation, runtime/typecheck verification, and end-to-end ChatGPT authentication remain pending until actually executed.
