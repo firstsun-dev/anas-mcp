@@ -54,6 +54,31 @@ The Worker MAY consume authenticated identity/context forwarded by Cloudflare Ac
 - THEN it uses the minimum trusted Access-provided identity/context available to the request
 - AND it SHALL NOT return raw Access tokens, identity assertions, or security headers to the MCP client
 
+### Requirement: Centralized Cloudflare Worker CI/CD
+Production and development Worker deployment SHALL use the reusable Cloudflare Worker pipeline maintained in `firstsun-dev/.github` rather than a duplicated deployment implementation in `anas-mcp`.
+
+#### Scenario: Repository adds a deployment workflow
+- WHEN `anas-mcp` defines GitHub Actions CI/CD
+- THEN the application workflow SHALL be a thin caller of `firstsun-dev/.github/.github/workflows/_cf-worker-template.yml` using an approved tag or pinned commit
+- AND the caller MAY define application-specific triggers, inputs, test/build commands, target URLs, and inherited deployment secrets
+- AND it SHALL NOT copy the reusable workflow's generic Wrangler deployment or rollback implementation
+
+#### Scenario: Generic deployment behavior must change
+- WHEN `anas-mcp` needs a change to generic Cloudflare Worker build/deploy/version/revert behavior
+- THEN the change SHOULD be made in `firstsun-dev/.github` and consumed through the reusable workflow
+- AND a local fork SHALL require an accepted OpenSpec exception explaining why the centralized workflow cannot support the requirement
+
+#### Scenario: CI authenticates to Cloudflare
+- WHEN the reusable workflow requires Cloudflare deployment credentials before Worker runtime bindings are available
+- THEN the required least-privilege deployment credential MAY use the protected GitHub Actions secret/configuration mechanism expected by the shared workflow
+- AND runtime credentials such as Google OAuth JSON, Clarity tokens, PostgreSQL passwords, or Access token material SHALL NOT be copied into CI solely for deployment
+
+#### Scenario: Caller workflow is enabled
+- GIVEN this repository currently uses npm scripts and the shared workflow currently invokes `pnpm exec wrangler` internally
+- WHEN the CI caller is enabled
+- THEN package-manager compatibility SHALL be verified first
+- AND a mismatch SHALL be resolved by aligning the project or improving the centralized workflow rather than duplicating deploy steps locally
+
 ### Requirement: Read-only analytics access
 The service SHALL expose analytics data only through read-only operations.
 
