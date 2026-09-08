@@ -1,0 +1,140 @@
+openapi: 3.2.0
+info:
+  title: anas-mcp HTTP API
+  version: 0.1.0
+  summary: HTTP surface for the Firstsun analytics MCP service
+  description: |
+    Canonical OpenAPI contract for HTTP endpoints exposed by `anas-mcp`.
+
+    This document describes the HTTP transport surface. MCP tool names,
+    tool input schemas, and tool output schemas remain defined by the MCP
+    server implementation and its MCP/Zod contracts; they are not modeled as
+    fake REST endpoints here.
+
+    Production `/mcp` traffic is protected by Cloudflare Access Managed OAuth.
+    The bearer token described below is issued/managed by Cloudflare Access;
+    clients such as ChatGPT obtain it through the Access OAuth flow rather than
+    manually pasting a shared static token.
+servers:
+  - url: http://localhost:8787
+    description: Local development
+  - url: https://{productionHost}
+    description: Production host after provisioning
+    variables:
+      productionHost:
+        default: analytics-mcp.example.invalid
+        description: Replace with the provisioned production hostname; do not treat this placeholder as deploy configuration.
+tags:
+  - name: Health
+    description: Minimal service readiness
+  - name: MCP
+    description: Model Context Protocol Streamable HTTP transport
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Health]
+      summary: Service readiness
+      description: |
+        Returns minimal readiness only. This endpoint may remain outside the
+        Cloudflare Access policy when Access is scoped specifically to `/mcp`.
+        It must never expose credentials, provider token state, Access policy
+        details, Hyperdrive configuration, or analytics data.
+      security: []
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                ready:
+                  value:
+                    service: anas-mcp
+                    status: ok
+  /mcp:
+    post:
+      operationId: handleMcp
+      tags: [MCP]
+      summary: MCP Streamable HTTP request
+      description: |
+        Handles MCP protocol messages through the stateless Cloudflare Agents
+        SDK `createMcpHandler()` transport.
+
+        This operation intentionally documents the HTTP transport rather than
+        enumerating MCP tools as REST operations. Use MCP initialization and
+        `tools/list` to discover the active tool contract.
+
+        Production requests must pass the Cloudflare Access Managed OAuth
+        boundary. A static shared bearer token is not a supported interactive
+        authentication mechanism.
+      security:
+        - CloudflareAccessBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpProtocolMessage'
+      responses:
+        '200':
+          description: MCP protocol response or stream
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpProtocolMessage'
+            text/event-stream:
+              schema:
+                type: string
+              description: Streamable MCP response when negotiated by the transport.
+        '202':
+          description: MCP notification/request accepted when the protocol operation does not require an immediate response body.
+        '400':
+          description: Invalid MCP or HTTP request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required by the Cloudflare Access boundary
+        '403':
+          description: Authenticated identity is not allowed by Cloudflare Access policy
+        '404':
+          description: Route not found or request is not valid for the configured MCP route
+        '405':
+          description: HTTP method not supported by the configured stateless transport
+components:
+  securitySchemes:
+    CloudflareAccessBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: Cloudflare Access OAuth token
+      description: |
+        Short-lived bearer credential managed by Cloudflare Access Managed OAuth.
+        Interactive MCP clients obtain this credential through OAuth discovery,
+        authorization code, and PKCE. This is not a manually distributed static token.
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [service, status]
+      properties:
+        service:
+          type: string
+          const: anas-mcp
+        status:
+          type: string
+          enum: [ok]
+    McpProtocolMessage:
+      type: object
+      description: |
+        MCP protocol message envelope. The authoritative protocol schema is the
+        MCP specification and the installed MCP server SDK, not this OpenAPI
+        approximation. Fields are intentionally open to preserve protocol-version
+        compatibility.
+      additionalProperties: true
+    ErrorResponse:
+      type: object
+      description: Safe error response that must not contain credentials, bearer tokens, Access assertions, or raw provider secrets.
+      additionalProperties: true
