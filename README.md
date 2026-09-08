@@ -20,6 +20,7 @@ Cloudflare Worker: anas-mcp
         +--> Hyperdrive --> PostgreSQL --> Clarity analytics
 ```
 
+- **HTTP API contract:** repository-root `openapi.yaml` uses OpenAPI 3.2.0 and is intended for Swagger-compatible tooling. It documents the HTTP surface; MCP tools remain MCP-native schemas rather than fake REST endpoints.
 - **MCP authentication:** production `/mcp` is protected by Cloudflare Access Managed OAuth. ChatGPT should authenticate through Access; no shared static bearer token is required for the normal interactive flow.
 - **GA4:** direct Google Analytics Data API queries.
 - **Search Console:** direct Search Console API queries.
@@ -31,9 +32,29 @@ Cloudflare Worker: anas-mcp
 
 See:
 
+- `openapi.yaml` and `docs/api.md` for the HTTP/OpenAPI contract
 - `docs/cloudflare-access.md` for MCP authentication and Access setup
 - `docs/credentials.md` for credential ownership/storage policy
 - `docs/cicd.md` for centralized deployment policy and caller-workflow contract
+
+## OpenAPI / Swagger policy
+
+`openapi.yaml` is the canonical HTTP API description.
+
+Current documented HTTP surface:
+
+```text
+GET  /health
+POST /mcp
+```
+
+Use Swagger-compatible OpenAPI 3.2 tooling to inspect/render the contract.
+
+Do not represent MCP tools such as future `ga4_run_report`, `gsc_search_analytics`, or `clarity_page` as fake REST routes. Those contracts belong to MCP tool schemas and are discovered through MCP.
+
+Any change to an HTTP route, method, authentication requirement, status code, content type, or stable payload must update `openapi.yaml` in the same change.
+
+Automated OpenAPI validation is tracked in `openspec/changes/adopt-openapi-http-contract/` and must be included in the project check/centralized CI path before being considered complete.
 
 ## Authentication policy summary
 
@@ -106,12 +127,13 @@ The repository currently contains the MCP foundation and architecture specificat
 - stateless `/mcp` endpoint using Cloudflare Agents SDK
 - `/health` HTTP endpoint
 - MCP `health` tool
+- OpenAPI 3.2.0 HTTP contract
 - OpenSpec architecture, requirements, design, and implementation tasks
 - Secrets Store first credential policy
 - Cloudflare Access Managed OAuth production-auth decision
 - centralized `firstsun-dev/.github` Cloudflare Worker CI/CD decision
 
-Cloudflare dashboard Access configuration, datasource integrations, deployment caller, and end-to-end ChatGPT authentication are not considered verified until actually tested.
+Cloudflare dashboard Access configuration, datasource integrations, deployment caller, automated OpenAPI validation, and end-to-end ChatGPT authentication are not considered verified until actually tested.
 
 ## Development
 
@@ -146,6 +168,8 @@ Local MCP behavior may be tested before production Access is provisioned, but pr
 npm run check
 ```
 
+The final project check should also validate `openapi.yaml` with an OpenAPI 3.2-capable validator. Until that validator is actually wired in, OpenAPI automated validation remains pending.
+
 For production auth, follow `docs/cloudflare-access.md` and verify both allowed and denied identities.
 
 ## Deployment
@@ -167,6 +191,8 @@ Start with:
 - `openspec/changes/bootstrap-analytics-mcp/` — bootstrap design/tasks
 - `openspec/changes/add-cloudflare-access-auth/` — Cloudflare Access authentication decision and rollout tasks
 - `openspec/changes/use-centralized-cf-worker-ci/` — organization-managed Cloudflare Worker CI/CD decision
+- `openspec/changes/adopt-openapi-http-contract/` — OpenAPI/Swagger HTTP contract decision
+- `docs/api.md` — OpenAPI/Swagger ownership and drift policy
 - `docs/cloudflare-access.md` — production Access authentication model and operator checklist
 - `docs/credentials.md` — credential ownership, storage, and exception policy
 - `docs/cicd.md` — reusable deployment workflow policy
