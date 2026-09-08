@@ -32,13 +32,14 @@ Changes to generic deployment behavior belong in `firstsun-dev/.github`, not in 
 
 ### `firstsun-dev/anas-mcp`
 
-Owns only application-specific caller configuration, for example:
+Owns only application-specific caller configuration and project verification, for example:
 
 - workflow triggers
 - `app_name`
 - `app_path`
 - application version input
 - build/check commands
+- OpenAPI validation through the aggregate project check
 - smoke-test command
 - production/dev URLs
 - `secrets: inherit` where required by the reusable workflow contract
@@ -82,6 +83,8 @@ jobs:
       app_url_dev: <development URL when provisioned>
 ```
 
+The project check used by this caller must eventually include both TypeScript verification and `openapi.yaml` validation with an OpenAPI 3.2-capable validator.
+
 This is a contract example, not a license to guess unresolved values.
 
 ## Package-manager compatibility
@@ -95,6 +98,22 @@ Before enabling deployment, verify one of the following with the current shared 
 3. update the reusable workflow centrally in `firstsun-dev/.github` to support the required package-manager contract.
 
 Do NOT copy the deployment steps into this repository merely to bypass a package-manager mismatch.
+
+## OpenAPI validation gate
+
+`openapi.yaml` is the canonical HTTP contract and uses OpenAPI 3.2.0. See `docs/api.md`.
+
+Before deployment is enabled:
+
+- select an OpenAPI 3.2-capable validator;
+- add a local `check:openapi` or equivalent command;
+- include it in the project's aggregate `check` command;
+- configure the thin caller/shared pipeline so that the aggregate check runs before deployment;
+- fail CI when the OpenAPI contract is invalid.
+
+If OpenAPI validation becomes a standard requirement across Firstsun services, prefer adding reusable validation support in `firstsun-dev/.github` rather than duplicating generic setup in every repository.
+
+Do not downgrade `openapi.yaml` to an older OpenAPI version merely because an outdated CI tool cannot parse 3.2. Update the validator/toolchain or make an explicit reviewed compatibility decision.
 
 ## Secrets and deployment credentials
 
