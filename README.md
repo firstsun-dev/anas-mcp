@@ -27,11 +27,13 @@ Cloudflare Worker: anas-mcp
 - **Credentials:** Secrets Store first. Any long-lived secret consumed directly by this Worker should come from Cloudflare Secrets Store whenever supported.
 - **Google OAuth:** one JSON credential stored in Cloudflare Secrets Store.
 - **Database:** read-only PostgreSQL access through Cloudflare Hyperdrive; the database password remains managed by Hyperdrive and is not duplicated into Worker secrets.
+- **CI/CD:** Cloudflare Worker deployment is implemented centrally in `firstsun-dev/.github`; this repository must use a thin caller for the shared `_cf-worker-template.yml` workflow rather than duplicating deploy steps.
 
 See:
 
 - `docs/cloudflare-access.md` for MCP authentication and Access setup
 - `docs/credentials.md` for credential ownership/storage policy
+- `docs/cicd.md` for centralized deployment policy and caller-workflow contract
 
 ## Authentication policy summary
 
@@ -67,7 +69,35 @@ Intentional exceptions:
 - PostgreSQL credentials stay in the Hyperdrive connection.
 - The Microsoft Clarity API token stays in `firstsun-dev/windmill-flows` because this service never calls Clarity directly.
 - Derived short-lived Google OAuth access tokens stay in runtime memory only.
-- CI bootstrap credentials may use the CI provider's protected secret store when they are required before Cloudflare can be accessed; prefer workload identity/OIDC where supported.
+- CI bootstrap credentials such as the Cloudflare deploy token/account ID may use the protected GitHub Actions mechanism required by the organization-managed reusable deployment workflow.
+
+## CI/CD policy summary
+
+The deployment implementation belongs to:
+
+```text
+firstsun-dev/.github/.github/workflows/_cf-worker-template.yml
+```
+
+`anas-mcp` may add a thin caller workflow similar to:
+
+```yaml
+jobs:
+  pipeline:
+    uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1
+    secrets: inherit
+    with:
+      app_name: anas-mcp
+      app_path: .
+      app_version: <project version>
+      build_cmd: <verified build/check command>
+```
+
+Do not copy the shared `wrangler versions upload/deploy`, rollback, or generic runner logic into this repository.
+
+The current project uses npm scripts while the central workflow currently invokes `pnpm exec wrangler` internally. Package-manager compatibility must be verified before the caller is enabled; if there is a mismatch, prefer aligning the project or improving the central workflow rather than forking deploy logic locally.
+
+See `docs/cicd.md` and `openspec/changes/use-centralized-cf-worker-ci/`.
 
 ## Current state
 
@@ -79,8 +109,9 @@ The repository currently contains the MCP foundation and architecture specificat
 - OpenSpec architecture, requirements, design, and implementation tasks
 - Secrets Store first credential policy
 - Cloudflare Access Managed OAuth production-auth decision
+- centralized `firstsun-dev/.github` Cloudflare Worker CI/CD decision
 
-Cloudflare dashboard Access configuration and end-to-end ChatGPT authentication are not considered verified until actually tested.
+Cloudflare dashboard Access configuration, datasource integrations, deployment caller, and end-to-end ChatGPT authentication are not considered verified until actually tested.
 
 ## Development
 
@@ -119,9 +150,11 @@ For production auth, follow `docs/cloudflare-access.md` and verify both allowed 
 
 ## Deployment
 
-```bash
-npm run deploy
-```
+Do not make `npm run deploy` or locally copied Wrangler deployment commands the normal production CI path.
+
+Production/development CI deployment must be invoked through the reusable workflow maintained by `firstsun-dev/.github`. The application repository should contain only the thin caller after package-manager compatibility, versioning, URLs, and Cloudflare bootstrap credentials have been resolved.
+
+See `docs/cicd.md`.
 
 Do not commit real Cloudflare resource IDs, database credentials, Google OAuth credentials, access tokens, Access assertions, or private analytics payloads.
 
@@ -133,7 +166,9 @@ Start with:
 - `openspec/specs/analytics-mcp/spec.md` — baseline capability requirements
 - `openspec/changes/bootstrap-analytics-mcp/` — bootstrap design/tasks
 - `openspec/changes/add-cloudflare-access-auth/` — Cloudflare Access authentication decision and rollout tasks
+- `openspec/changes/use-centralized-cf-worker-ci/` — organization-managed Cloudflare Worker CI/CD decision
 - `docs/cloudflare-access.md` — production Access authentication model and operator checklist
 - `docs/credentials.md` — credential ownership, storage, and exception policy
+- `docs/cicd.md` — reusable deployment workflow policy
 
 See `AGENTS.md` before making code or architecture changes.
