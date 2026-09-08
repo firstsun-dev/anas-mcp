@@ -9,9 +9,9 @@
 - [x] Add `docs/api.md` describing OpenAPI/Swagger ownership and drift rules.
 
 ## Project policy
-- [ ] Add the OpenAPI requirement to `AGENTS.md`.
-- [ ] Add the OpenAPI/Swagger contract to `README.md` and `openspec/project.md`.
-- [ ] Add baseline OpenSpec requirements for HTTP/OpenAPI synchronization.
+- [x] Add the OpenAPI requirement to `AGENTS.md`.
+- [x] Add the OpenAPI/Swagger contract to `README.md` and `openspec/project.md`.
+- [x] Add baseline OpenSpec requirements for HTTP/OpenAPI synchronization.
 
 ## Validation
 - [ ] Select and pin an OpenAPI 3.2-capable validator compatible with the project package-manager decision.
@@ -29,4 +29,4 @@
 
 ## Verification evidence
 
-On 2026-09-08 the current Worker route implementation was inspected before writing the initial contract. `src/index.ts` implements `GET /health` returning `{ "service": "anas-mcp", "status": "ok" }` and delegates the MCP route to `createMcpHandler()` at `/mcp`. The OpenAPI file and documentation were created from that observed surface. Automated OpenAPI validation and Swagger rendering remain pending until an OpenAPI 3.2-capable validator/tooling choice is added to the project.
+On 2026-09-08 the current Worker route implementation was inspected before writing the initial contract. `src/index.ts` implements `GET /health` returning `{ "service": "anas-mcp", "status": "ok" }` and delegates the MCP route to `createMcpHandler()` at `/mcp`. The OpenAPI file and documentation were created from that observed surface. Project policy was synchronized across `AGENTS.md`, `README.md`, `openspec/project.md`, and the baseline capability spec. Automated OpenAPI validation and Swagger rendering remain pending until an OpenAPI 3.2-capable validator/tooling choice is added to the project.
