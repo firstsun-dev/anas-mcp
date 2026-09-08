@@ -32,6 +32,20 @@ Cloudflare Worker CI/CD is centralized in **`firstsun-dev/.github`**.
 
 This decision is specified in `openspec/changes/use-centralized-cf-worker-ci/` and `docs/cicd.md`.
 
+## HTTP API contract strategy
+
+The HTTP surface is specified with **OpenAPI 3.2.0** in repository-root `openapi.yaml` and is intended to be rendered/inspected with Swagger-compatible tooling.
+
+- `openapi.yaml` is the canonical HTTP API description for routes, methods, authentication requirements, status codes, content types, and stable payloads owned by `anas-mcp`.
+- Any HTTP surface change SHALL update `openapi.yaml` in the same change.
+- OpenAPI documents `/mcp` as an MCP Streamable HTTP transport endpoint; it SHALL NOT model each MCP tool as a fake REST endpoint.
+- MCP tool input/output contracts remain authoritative in MCP SDK/Zod schemas and are discovered through the MCP protocol.
+- CI SHALL validate `openapi.yaml` with an OpenAPI 3.2-capable validator before deployment once the project validation tool is selected.
+- Swagger/OpenAPI examples SHALL NOT include production credentials, Access assertions, provider tokens, database secrets, or private analytics payloads.
+- Runtime Swagger UI serving is optional and requires an explicit decision on route and Access protection before implementation.
+
+This decision is specified in `openspec/changes/adopt-openapi-http-contract/` and `docs/api.md`.
+
 ## Data-source strategy
 
 ### Google Analytics 4
@@ -100,6 +114,16 @@ firstsun-dev/.github reusable Cloudflare Worker pipeline
 Cloudflare Worker deployment
 ```
 
+Contract path:
+
+```text
+HTTP routes/auth/media types
+        -> openapi.yaml (OpenAPI 3.2 / Swagger)
+
+MCP tool contracts
+        -> MCP SDK / Zod schemas
+```
+
 ## Non-goals for the initial system
 - No write operations against analytics providers.
 - No direct Microsoft Clarity API access.
@@ -110,6 +134,7 @@ Cloudflare Worker deployment
 - No custom MCP account/password database.
 - No Worker-managed OAuth token database when Cloudflare Access Managed OAuth provides the client authentication boundary.
 - No independent local Cloudflare deployment implementation that duplicates the organization reusable workflow.
+- No fake REST endpoint per MCP tool solely for Swagger documentation.
 
 ## Tool design principles
 - Prefer a small number of composable tools over many near-duplicate endpoint wrappers.
@@ -121,10 +146,11 @@ Cloudflare Worker deployment
 
 ## Initial capability roadmap
 1. MCP foundation and health endpoint.
-2. Cloudflare Access Managed OAuth protection for production `/mcp`.
-3. Centralized Cloudflare Worker CI/CD caller using `firstsun-dev/.github`.
-4. Cloudflare Secrets Store binding and Google OAuth credential loading/access-token exchange.
-5. GA4 generic report, realtime, and metadata tools.
-6. Search Console analytics, URL inspection, and site-list tools.
-7. Hyperdrive-backed Clarity overview/page tools.
-8. Cross-source analytical workflows only after repeated usage patterns justify dedicated tools.
+2. OpenAPI 3.2 HTTP contract and automated validation.
+3. Cloudflare Access Managed OAuth protection for production `/mcp`.
+4. Centralized Cloudflare Worker CI/CD caller using `firstsun-dev/.github`.
+5. Cloudflare Secrets Store binding and Google OAuth credential loading/access-token exchange.
+6. GA4 generic report, realtime, and metadata tools.
+7. Search Console analytics, URL inspection, and site-list tools.
+8. Hyperdrive-backed Clarity overview/page tools.
+9. Cross-source analytical workflows only after repeated usage patterns justify dedicated tools.
