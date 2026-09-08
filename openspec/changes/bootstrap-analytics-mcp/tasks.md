@@ -7,6 +7,7 @@
 - [x] Add initial MCP `health` tool.
 - [x] Add project instructions and baseline OpenSpec documents.
 - [x] Add `docs/credentials.md` with the Secrets Store first credential policy.
+- [x] Record Cloudflare Access Managed OAuth as the production `/mcp` authentication decision in `openspec/changes/add-cloudflare-access-auth/`.
 
 ## Credential platform
 - [ ] Create or select the production Cloudflare Secrets Store used by `anas-mcp`.
@@ -46,12 +47,15 @@
 - [ ] Add tests ensuring SQL is parameterized and no arbitrary SQL input is exposed.
 
 ## Production security and deployment
-- [ ] Add MCP client authentication/authorization as a separate OpenSpec change.
-- [ ] Store any long-lived MCP authentication secret consumed by the Worker in Cloudflare Secrets Store.
+- [ ] Execute the Cloudflare Access rollout tasks in `openspec/changes/add-cloudflare-access-auth/tasks.md`.
+- [ ] Protect production `/mcp` with a Cloudflare Access self-hosted application and enable Managed OAuth.
+- [ ] Configure default-deny Access policy with explicit allowed Firstsun identities/groups.
+- [ ] Verify ChatGPT and MCP Inspector can authenticate through Access without a manually pasted shared bearer token.
+- [ ] Do not add `OAUTH_KV`, D1, Durable Objects, or Worker-managed OAuth token state solely for MCP authentication.
 - [ ] Prefer workload identity/OIDC for CI-to-Cloudflare authentication where supported; otherwise document the protected CI bootstrap-secret exception and least-privilege scope.
 - [ ] Configure production domain/route.
 - [ ] Add CI checks for `npm run check`.
 - [ ] Validate the deployed `/mcp` endpoint with MCP Inspector.
 
 ## Verification evidence
-Bootstrap repository structure and documentation were created on 2026-09-08. The Secrets Store first credential policy was added on 2026-09-08. Runtime/typecheck verification remains pending until dependencies are installed by CI or a development environment.
+Bootstrap repository structure and documentation were created on 2026-09-08. The Secrets Store first credential policy and Cloudflare Access Managed OAuth authentication decision were recorded on 2026-09-08. Cloudflare dashboard configuration, runtime/typecheck verification, and end-to-end ChatGPT authentication remain pending until actually executed.
