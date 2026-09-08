@@ -8,7 +8,51 @@ The service SHALL expose a stateless MCP endpoint at `/mcp` on Cloudflare Worker
 #### Scenario: MCP client connects
 - GIVEN the Worker is deployed
 - WHEN an MCP-compatible client connects to `/mcp`
-- THEN the client can complete MCP initialization and list available tools
+- THEN the client can complete MCP initialization and list available tools after satisfying the production authentication boundary
+
+### Requirement: Cloudflare Access production authentication
+Production access to `/mcp` SHALL be protected by Cloudflare Access with Managed OAuth enabled.
+
+#### Scenario: Unauthenticated MCP client connects
+- GIVEN `/mcp` is deployed behind Cloudflare Access
+- WHEN an unauthenticated standards-compliant MCP client requests the resource
+- THEN Cloudflare Access presents standards-based OAuth discovery/authentication behavior
+- AND the client is not allowed to invoke MCP tools before successful authentication
+
+#### Scenario: Authorized user connects from ChatGPT
+- GIVEN the user matches an approved Cloudflare Access policy
+- WHEN ChatGPT completes the Access Managed OAuth authorization flow with PKCE
+- THEN Access permits the authenticated request to reach `/mcp`
+- AND the MCP client can initialize and invoke tools permitted by the service
+
+#### Scenario: User is not allowed by Access policy
+- GIVEN the user does not match an allow policy
+- WHEN the user attempts the Access authorization flow
+- THEN access to `/mcp` is denied
+- AND the Worker does not bypass the Access decision
+
+### Requirement: No parallel static-token authentication
+The normal production ChatGPT/MCP authentication path SHALL NOT use a shared static bearer token or client-identification heuristics.
+
+#### Scenario: Alternative authentication is proposed
+- WHEN an implementation proposes OpenAI IP allowlisting, User-Agent matching, query-string tokens, or a shared long-lived bearer token as the primary interactive MCP authentication mechanism
+- THEN the proposal SHALL be rejected unless a new accepted OpenSpec change explicitly supersedes the Cloudflare Access decision
+
+### Requirement: Access-owned OAuth state
+Cloudflare Access Managed OAuth SHALL own MCP client authentication state and tokens at the edge.
+
+#### Scenario: MCP authentication state is required
+- WHEN ChatGPT authenticates to the protected `/mcp` resource
+- THEN `anas-mcp` SHALL NOT introduce KV, D1, Durable Objects, PostgreSQL, or another application datastore solely to persist MCP OAuth state/tokens
+- AND Access-managed token material SHALL NOT be copied into application storage or MCP responses
+
+### Requirement: Authenticated identity minimization
+The Worker MAY consume authenticated identity/context forwarded by Cloudflare Access only when necessary for authorization, audit, or future per-user policy.
+
+#### Scenario: Tool handler uses authenticated identity
+- WHEN a tool needs caller identity
+- THEN it uses the minimum trusted Access-provided identity/context available to the request
+- AND it SHALL NOT return raw Access tokens, identity assertions, or security headers to the MCP client
 
 ### Requirement: Read-only analytics access
 The service SHALL expose analytics data only through read-only operations.
@@ -66,6 +110,11 @@ Google OAuth credentials SHALL be stored as one JSON credential in Cloudflare Se
 ### Requirement: Service-managed credential exceptions
 Credentials owned by platform integrations or other services SHALL remain with their owning service rather than being duplicated into `anas-mcp` Secrets Store.
 
+#### Scenario: Cloudflare Access authenticates MCP clients
+- WHEN Cloudflare Access Managed OAuth is used for `/mcp`
+- THEN Access-owned OAuth client/session/token material remains managed by Cloudflare Access
+- AND `anas-mcp` SHALL NOT duplicate that platform-managed material into Secrets Store or an application datastore
+
 #### Scenario: Worker accesses PostgreSQL
 - WHEN the Worker accesses PostgreSQL through Hyperdrive
 - THEN the database credential remains managed by the Hyperdrive connection
@@ -90,3 +139,11 @@ Analytics tools SHALL enforce bounded request and response sizes.
 #### Scenario: Excessive requested rows
 - WHEN a client requests more than the configured safe limit
 - THEN the service clamps or rejects the request with a clear validation error
+
+### Requirement: Minimal health endpoint
+`/health` MAY remain unauthenticated when Cloudflare Access protection is scoped specifically to `/mcp`, but it SHALL expose no sensitive state.
+
+#### Scenario: Health check is requested
+- WHEN a caller requests `/health`
+- THEN the service may return a minimal readiness response such as `{ "status": "ok" }`
+- AND it SHALL NOT disclose credentials, Access configuration, provider authentication state, database details, or analytics data
