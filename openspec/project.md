@@ -18,6 +18,20 @@ Production MCP access is authenticated and authorized by **Cloudflare Access**.
 
 This decision is specified in `openspec/changes/add-cloudflare-access-auth/` and `docs/cloudflare-access.md`.
 
+## CI/CD strategy
+
+Cloudflare Worker CI/CD is centralized in **`firstsun-dev/.github`**.
+
+- Production and development deployment implementation SHALL use the organization-managed reusable workflow `firstsun-dev/.github/.github/workflows/_cf-worker-template.yml`.
+- `anas-mcp` may contain a thin caller workflow that defines triggers, application-specific inputs, test/build commands, target URLs, and `secrets: inherit` as required by the reusable workflow contract.
+- `anas-mcp` SHALL NOT copy or fork the shared `wrangler versions upload/deploy`, generic branch routing, rollback, or organization-wide runner/setup implementation merely to customize deployment.
+- Generic Cloudflare pipeline improvements belong in `firstsun-dev/.github`; application-specific exceptions require an accepted OpenSpec change.
+- CI bootstrap credentials required to authenticate GitHub Actions to Cloudflare may use the protected GitHub Actions secret/configuration mechanism expected by the reusable workflow. Runtime provider credentials must not be copied into GitHub Actions solely for deployment.
+- Before enabling the caller workflow, verify package-manager compatibility: this repository currently uses npm scripts while the shared pipeline currently invokes `pnpm exec wrangler` internally.
+- Production deployment must not be claimed ready until the caller workflow, version input, build/check command, target URLs, and Cloudflare bootstrap credentials have been validated.
+
+This decision is specified in `openspec/changes/use-centralized-cf-worker-ci/` and `docs/cicd.md`.
+
 ## Data-source strategy
 
 ### Google Analytics 4
@@ -48,7 +62,7 @@ This decision is specified in `openspec/changes/add-cloudflare-access-auth/` and
 - Cloudflare Access Managed OAuth credentials/tokens are platform-managed and are not duplicated into `anas-mcp` Secrets Store.
 - Clarity API token remains owned by the Windmill ingestion project and is not copied into `anas-mcp`.
 - Database credentials are owned by Hyperdrive and MUST NOT be duplicated into Secrets Store or Worker configuration; the database role must be read-only.
-- CI/deployment bootstrap credentials may live in the CI provider's protected secret store only when they are required before Cloudflare Secrets Store can be accessed; prefer workload identity/OIDC where supported.
+- CI/deployment bootstrap credentials may live in the CI provider's protected secret store only when they are required before Cloudflare Secrets Store can be accessed; for this project, deployment must flow through the reusable workflow in `firstsun-dev/.github`.
 - Non-sensitive identifiers such as GA4 property ID and Search Console site URL may use Wrangler `vars`.
 
 ## Runtime architecture
@@ -71,6 +85,21 @@ Cloudflare Worker: anas-mcp
         +--> Hyperdrive --> PostgreSQL --> blog_analytics Clarity data
 ```
 
+Deployment path:
+
+```text
+GitHub event in anas-mcp
+        |
+        v
+thin caller workflow
+        |
+        v
+firstsun-dev/.github reusable Cloudflare Worker pipeline
+        |
+        v
+Cloudflare Worker deployment
+```
+
 ## Non-goals for the initial system
 - No write operations against analytics providers.
 - No direct Microsoft Clarity API access.
@@ -80,6 +109,7 @@ Cloudflare Worker: anas-mcp
 - No user-facing dashboard.
 - No custom MCP account/password database.
 - No Worker-managed OAuth token database when Cloudflare Access Managed OAuth provides the client authentication boundary.
+- No independent local Cloudflare deployment implementation that duplicates the organization reusable workflow.
 
 ## Tool design principles
 - Prefer a small number of composable tools over many near-duplicate endpoint wrappers.
@@ -92,8 +122,9 @@ Cloudflare Worker: anas-mcp
 ## Initial capability roadmap
 1. MCP foundation and health endpoint.
 2. Cloudflare Access Managed OAuth protection for production `/mcp`.
-3. Cloudflare Secrets Store binding and Google OAuth credential loading/access-token exchange.
-4. GA4 generic report, realtime, and metadata tools.
-5. Search Console analytics, URL inspection, and site-list tools.
-6. Hyperdrive-backed Clarity overview/page tools.
-7. Cross-source analytical workflows only after repeated usage patterns justify dedicated tools.
+3. Centralized Cloudflare Worker CI/CD caller using `firstsun-dev/.github`.
+4. Cloudflare Secrets Store binding and Google OAuth credential loading/access-token exchange.
+5. GA4 generic report, realtime, and metadata tools.
+6. Search Console analytics, URL inspection, and site-list tools.
+7. Hyperdrive-backed Clarity overview/page tools.
+8. Cross-source analytical workflows only after repeated usage patterns justify dedicated tools.
