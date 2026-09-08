@@ -10,6 +10,41 @@ The service SHALL expose a stateless MCP endpoint at `/mcp` on Cloudflare Worker
 - WHEN an MCP-compatible client connects to `/mcp`
 - THEN the client can complete MCP initialization and list available tools after satisfying the production authentication boundary
 
+### Requirement: OpenAPI HTTP contract
+The service SHALL maintain a repository-root `openapi.yaml` using OpenAPI 3.2.0 as the canonical description of the `anas-mcp` HTTP surface.
+
+#### Scenario: HTTP route behavior changes
+- WHEN a change adds, removes, or modifies an HTTP path, method, authentication requirement, status code, content type, or stable request/response payload owned by `anas-mcp`
+- THEN `openapi.yaml` SHALL be updated in the same change
+- AND implementation/tests SHALL conform to the updated contract
+
+#### Scenario: Developer inspects the HTTP API
+- WHEN a developer opens `openapi.yaml` in Swagger-compatible tooling supporting OpenAPI 3.2.0
+- THEN the currently supported HTTP surface can be inspected without requiring source-code inspection
+- AND the document SHALL NOT contain production credentials, Access assertions, provider tokens, database secrets, or private analytics payloads
+
+### Requirement: MCP/OpenAPI contract separation
+OpenAPI SHALL describe the MCP HTTP transport but SHALL NOT replace the authoritative MCP tool schemas.
+
+#### Scenario: MCP tool is added or modified
+- WHEN a tool such as a GA4, Search Console, or Clarity tool is added or changed
+- THEN its input/output schema SHALL remain defined through the MCP SDK/schema layer
+- AND the tool SHALL NOT be represented as a fake REST endpoint solely for Swagger visibility
+- AND OpenAPI requires an update only when the HTTP transport surface itself changes
+
+#### Scenario: `/mcp` is described in OpenAPI
+- WHEN the MCP endpoint is documented
+- THEN OpenAPI SHALL describe its route, method, authentication boundary, supported HTTP media types, and safe HTTP status behavior
+- AND the MCP protocol/installed SDK remains authoritative for the protocol-message envelope
+
+### Requirement: OpenAPI validation
+The project SHALL validate `openapi.yaml` with an OpenAPI 3.2-capable validator before production deployment once the validator is integrated into the project check path.
+
+#### Scenario: CI validates the project
+- WHEN the centralized CI/CD caller executes the project's aggregate verification command
+- THEN OpenAPI validation SHALL run before deployment
+- AND validation failure SHALL block deployment
+
 ### Requirement: Cloudflare Access production authentication
 Production access to `/mcp` SHALL be protected by Cloudflare Access with Managed OAuth enabled.
 
