@@ -1,7 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { BingWebmasterClient, secretsStoreTokenProvider } from "./services/bing-webmaster";
+import { registerBingWebmasterTools } from "./tools/bing-webmaster";
+import type { Env } from "./index";
 
-export function createServer() {
+export function createServer(env: Env = {}) {
   const server = new McpServer({
     name: "Firstsun Analytics",
     version: "0.1.0",
@@ -26,6 +29,11 @@ export function createServer() {
         },
       ],
     }),
+  );
+
+  registerBingWebmasterTools(
+    server,
+    new BingWebmasterClient({ getToken: secretsStoreTokenProvider(env.BING_WEBMASTER_TOKEN) }),
   );
 
   return server;

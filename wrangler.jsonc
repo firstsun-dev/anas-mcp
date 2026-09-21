@@ -6,5 +6,15 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
-  }
+  },
+  // Long-lived provider credentials come from Cloudflare Secrets Store (see docs/credentials.md).
+  // store_id is a non-secret identifier but account-specific: replace the placeholder with your
+  // Secrets Store ID (`wrangler secrets-store store list`) before deploying. Never put the token here.
+  "secrets_store_secrets": [
+    {
+      "binding": "BING_WEBMASTER_TOKEN",
+      "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
+      "secret_name": "ANAS_PROD_BING_WEBMASTER_TOKEN"
+    }
+  ]
 }
