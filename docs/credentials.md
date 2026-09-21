@@ -9,7 +9,7 @@ Any long-lived secret that is consumed directly by the `anas-mcp` Worker MUST be
 Examples include:
 
 - Google OAuth credential JSON
-- Bing Webmaster OAuth credential JSON (client ID, client secret, refresh-token material, and token endpoint metadata as required)
+- Bing Webmaster provider token/API key
 - OAuth client secrets owned by `anas-mcp`
 - API tokens used directly by `anas-mcp`
 - application signing/encryption secrets owned by `anas-mcp`
@@ -58,7 +58,7 @@ Prefer names that identify application, environment, and purpose, for example:
 
 ```text
 ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS
-ANAS_PROD_BING_WEBMASTER_OAUTH_CREDENTIALS
+ANAS_PROD_BING_WEBMASTER_TOKEN
 ANAS_STAGING_GOOGLE_OAUTH_CREDENTIALS
 ANAS_PROD_MCP_OAUTH_CLIENT_SECRET
 ```
@@ -77,6 +77,13 @@ For structured credentials such as Google OAuth JSON:
 4. Exchange long-lived credential material for a short-lived provider token.
 5. Keep the short-lived token only in runtime memory.
 6. Redact all credential material from errors and telemetry.
+
+For opaque provider tokens such as Bing Webmaster:
+
+1. Retrieve the bound token from Secrets Store at runtime.
+2. Validate that the value is present and non-empty without logging it.
+3. Attach it only to the verified Bing Webmaster upstream request.
+4. Do not copy it into application storage, CI variables, logs, telemetry, or MCP responses.
 
 ## Review checklist
 

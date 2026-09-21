@@ -24,35 +24,28 @@ src/
 ├── tools/
 │   └── bing-webmaster.ts
 └── services/
-    ├── bing-auth.ts
     └── bing-webmaster.ts
 ```
 
 - `tools/bing-webmaster.ts`: Zod/MCP schemas, validation, bounded output shaping.
-- `services/bing-auth.ts`: Secrets Store credential loading and OAuth access-token refresh.
-- `services/bing-webmaster.ts`: upstream REST/JSON requests and provider error normalization.
+- `services/bing-webmaster.ts`: Secrets Store token loading, upstream REST/JSON requests, and provider error normalization.
 
 ## Authentication
-Use Bing Webmaster OAuth 2.0 with the least-privilege `Webmaster.read` scope.
+Use a long-lived Bing Webmaster provider token/API key for the initial Firstsun server-side integration.
 
-Store one structured credential in Cloudflare Secrets Store, logically containing the fields required to refresh provider access, for example:
+The production source of truth is a Cloudflare Secrets Store secret bound to the Worker, for example:
 
-```json
-{
-  "client_id": "...",
-  "client_secret": "...",
-  "refresh_token": "...",
-  "token_uri": "https://www.bing.com/webmasters/oauth/token"
-}
+```text
+BING_WEBMASTER_TOKEN
 ```
 
-The exact credential schema should be validated in code and may evolve if Microsoft changes its OAuth requirements.
+Treat the value as opaque credential material. The Worker retrieves it only at runtime and attaches it only to Bing Webmaster upstream requests using the authentication mechanism required by the verified REST/JSON endpoint.
 
 Rules:
-- Do not request `Webmaster.manage` for the initial integration.
-- Do not use API keys as the normal production credential path.
-- Do not commit or log credential values.
-- Derived access tokens are runtime-only and must not be persisted to Secrets Store, KV, D1, logs, or source control.
+- Do not commit or log the Bing provider token.
+- Do not copy the token into Wrangler `vars`, `.env`, `.dev.vars`, GitHub Actions, KV, D1, PostgreSQL, or source code.
+- Do not add an OAuth authorization-code/refresh-token flow for the initial Bing integration unless a future accepted OpenSpec change requires delegated user authorization.
+- Keep the MCP tool surface read-only even if the configured provider credential is technically capable of write operations.
 
 ## Initial MCP tools
 
@@ -86,7 +79,7 @@ The initial provider intentionally excludes URL submission, Sitemap mutation, si
 
 Adding a Bing write tool requires a new accepted OpenSpec change covering:
 - why write access is necessary
-- whether `Webmaster.manage` is required
+- what additional upstream credential capability is required
 - authorization and audit controls
 - tool confirmation/guardrails
 - blast radius and rollback behavior
@@ -104,7 +97,7 @@ Because Microsoft documentation contains historical samples, implementation work
 ## Error handling
 - Validate site URLs and tool limits before upstream calls.
 - Normalize authorization, quota, validation, and upstream failures.
-- Never include client secrets, refresh tokens, access tokens, or raw authorization headers in errors.
+- Never include the Bing provider token or raw authorization material in errors.
 - Do not return raw provider payloads by default.
 
 ## Observability

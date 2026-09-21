@@ -106,7 +106,7 @@ Production and development Worker deployment SHALL use the reusable Cloudflare W
 #### Scenario: CI authenticates to Cloudflare
 - WHEN the reusable workflow requires Cloudflare deployment credentials before Worker runtime bindings are available
 - THEN the required least-privilege deployment credential MAY use the protected GitHub Actions secret/configuration mechanism expected by the shared workflow
-- AND runtime credentials such as Google OAuth JSON, Clarity tokens, PostgreSQL passwords, or Access token material SHALL NOT be copied into CI solely for deployment
+- AND runtime credentials such as Google OAuth JSON, Bing Webmaster tokens, Clarity tokens, PostgreSQL passwords, or Access token material SHALL NOT be copied into CI solely for deployment
 
 #### Scenario: Caller workflow is enabled
 - GIVEN this repository currently uses npm scripts and the shared workflow currently invokes `pnpm exec wrangler` internally
@@ -150,19 +150,21 @@ The service SHALL query Bing Webmaster Tools directly through the Microsoft-supp
 - AND queries the supported read-only Bing Webmaster API operation
 - AND does not submit, modify, or delete provider data
 
-### Requirement: Bing Webmaster least-privilege OAuth
-Bing Webmaster provider access SHALL use OAuth 2.0 with the read-only `Webmaster.read` scope for the initial integration.
+### Requirement: Bing Webmaster token credential
+The initial Bing Webmaster integration SHALL use a long-lived provider token/API key stored in Cloudflare Secrets Store as the sole production source of truth.
 
-#### Scenario: Bing provider authorization is provisioned
-- WHEN credentials are created for `anas-mcp`
-- THEN only the permissions required for read access SHALL be granted
-- AND `Webmaster.manage` SHALL NOT be requested for the initial read-only integration
-- AND provider client credentials plus refresh-token material SHALL be stored in Cloudflare Secrets Store
-- AND derived access tokens SHALL remain runtime-only
+#### Scenario: Bing provider credential is provisioned
+- WHEN the Bing Webmaster provider is configured for `anas-mcp`
+- THEN the credential SHALL be stored in Cloudflare Secrets Store
+- AND the Worker SHALL retrieve it only at runtime
+- AND the credential SHALL NOT be copied into Wrangler `vars`, committed configuration, `.env`, `.dev.vars`, GitHub Actions, application databases, or logs
+- AND the credential SHALL NOT be returned in MCP tool results
+- AND no delegated user OAuth authorization-code or refresh-token state is required for the initial integration
 
 #### Scenario: A Bing write operation is proposed
 - WHEN an implementation proposes URL submission, Sitemap mutation, site configuration changes, or another write-capable Bing operation
 - THEN the change SHALL require a separate accepted OpenSpec change before implementation
+- AND the existing Bing MCP tools SHALL remain read-only regardless of the technical capabilities of the configured provider token
 
 ### Requirement: Bing legacy protocols are prohibited
 The Bing integration SHALL NOT use the legacy SOAP or POX interfaces.
@@ -179,6 +181,19 @@ The service SHALL read Microsoft Clarity analytics from PostgreSQL data ingested
 - WHEN a client requests Clarity metrics for a page
 - THEN the service reads the normalized `blog_analytics` data through a read-only PostgreSQL connection
 - AND no Clarity API quota is consumed
+
+### Requirement: Provider credentials are centralized in Secrets Store
+GA4, Google Search Console, and Bing Webmaster credentials consumed directly by `anas-mcp` SHALL use Cloudflare Secrets Store as their production source of truth.
+
+#### Scenario: Google analytics/search credentials are configured
+- WHEN GA4 or Google Search Console tools need provider authorization
+- THEN the shared Google OAuth credential JSON SHALL be loaded from Cloudflare Secrets Store
+- AND derived short-lived Google access tokens SHALL remain runtime-only
+
+#### Scenario: Bing Webmaster credentials are configured
+- WHEN a Bing Webmaster tool needs provider authorization
+- THEN the Bing provider token/API key SHALL be loaded from Cloudflare Secrets Store
+- AND the token SHALL NOT be persisted or duplicated into another application store
 
 ### Requirement: Secrets Store first
 Every long-lived secret consumed directly by the `anas-mcp` Worker SHALL be sourced from Cloudflare Secrets Store whenever Cloudflare supports that secret type.

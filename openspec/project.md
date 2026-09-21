@@ -61,7 +61,7 @@ This decision is specified in `openspec/changes/adopt-openapi-http-contract/` an
 ### Bing Webmaster Tools
 - Source: Bing Webmaster API using the Microsoft-supported REST/JSON interface current at implementation time.
 - Access pattern: direct API query at MCP request time.
-- Authentication: OAuth 2.0 with least-privilege `Webmaster.read`; long-lived credential material lives in Cloudflare Secrets Store and derived access tokens remain runtime-only.
+- Authentication: a long-lived Bing Webmaster provider token/API key stored in Cloudflare Secrets Store and read only at Worker runtime; no delegated per-user OAuth flow is required for the initial deployment.
 - Rationale: expose Bing search/index diagnostics alongside Google Search Console without introducing another ingestion pipeline.
 - Guardrail: do not implement legacy SOAP/POX integrations or write operations such as URL/Sitemap submission in the initial provider.
 
@@ -75,8 +75,8 @@ This decision is specified in `openspec/changes/adopt-openapi-http-contract/` an
 `anas-mcp` follows a **Secrets Store first** credential policy. See `docs/credentials.md` for the complete rules and exceptions.
 
 - Any long-lived secret consumed directly by the Worker MUST come from Cloudflare Secrets Store whenever supported.
-- Google OAuth credential is one JSON document stored in Cloudflare Secrets Store.
-- Bing Webmaster OAuth credential is one JSON document stored in Cloudflare Secrets Store and is authorized with the read-only `Webmaster.read` scope.
+- GA4 and Google Search Console use one Google OAuth credential JSON stored in Cloudflare Secrets Store; derived Google access tokens remain runtime-only.
+- Bing Webmaster uses a provider token/API key stored in Cloudflare Secrets Store; the MCP surface remains read-only regardless of the upstream token's technical capabilities.
 - Future API tokens, OAuth client secrets, signing keys, or encryption keys consumed directly by `anas-mcp` also belong in Secrets Store by default.
 - Production secrets MUST NOT use Wrangler `vars`, committed configuration, `.env`, `.dev.vars`, source code, or logs.
 - `wrangler secret` is not the preferred production store; using it when Secrets Store is available requires an accepted OpenSpec exception.
