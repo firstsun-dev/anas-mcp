@@ -30,4 +30,7 @@ describe("repository guardrails", () => {
     expect(w).not.toMatch(/apikey|api_key/i);
     expect(w).not.toMatch(/"(BING_WEBMASTER_TOKEN)"\s*:\s*"/);
   });
+  it("wrangler.jsonc has no placeholder Secrets Store id", () => {
+    expect(read("wrangler.jsonc")).not.toMatch(/REPLACE_WITH|OPERATOR_MUST_SET/);
+  });
 });

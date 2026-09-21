@@ -13,12 +13,12 @@
     }
   },
   // Long-lived provider credentials come from Cloudflare Secrets Store (see docs/credentials.md).
-  // NOT DEPLOYABLE AS-IS: store_id is an account-specific, non-secret identifier that the operator
-  // must supply (`wrangler secrets-store store list`). The Bing token itself never goes in this file.
+  // store_id is the non-secret ID of the shared default_secrets_store in the 首陽 account (dev and main).
+  // The secret must exist in that store before deploy; the Bing token itself never goes in this file.
   "secrets_store_secrets": [
     {
       "binding": "BING_WEBMASTER_TOKEN",
-      "store_id": "OPERATOR_MUST_SET_SECRETS_STORE_ID",
+      "store_id": "a2a4a60a04b142d3a0c7d482542e67fc",
       "secret_name": "ANAS_PROD_BING_WEBMASTER_TOKEN"
     }
   ]

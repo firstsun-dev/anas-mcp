@@ -10,7 +10,7 @@
 ## Credential provisioning
 - [ ] Create/select the production Bing Webmaster provider token/API key.
 - [ ] Store the token in Cloudflare Secrets Store as the sole production source of truth.
-- [ ] Add the production Secrets Store binding without committing real IDs or credential values. (Binding syntax is in `wrangler.jsonc` and passes `wrangler deploy --dry-run`, but `store_id` is still the non-deployable `OPERATOR_MUST_SET_SECRETS_STORE_ID`; operator must supply the real store ID.)
+- [x] Add the production Secrets Store binding without committing real IDs or credential values. (Binding uses the shared 首陽 `default_secrets_store` ID, a non-secret identifier; the secret itself is not yet created.)
 - [ ] Verify the Worker can read the token at runtime without exposing it to logs or tool responses.
 - [ ] Verify staging and production credentials can be rotated independently.
 
@@ -49,5 +49,5 @@ OpenSpec design added on 2026-09-21 and updated the same day to use a Cloudflare
 - `npm run check` (typecheck + vitest, 82 tests using mocked `fetch`) passes.
 - `wrangler deploy --dry-run` accepts `wrangler.jsonc` including `observability.traces.enabled: false` and the Secrets Store binding syntax.
 - `npm run dev` + MCP Inspector (`@modelcontextprotocol/inspector --cli`, streamable HTTP): `tools/list` shows `health`, `bing_list_sites`, `bing_search_performance`, `bing_url_info`. `bing_list_sites` without a bound secret returned only `missing_configuration` (no stack trace, token or raw binding error); `startDate=2026-02-30` is rejected by input validation.
-- `store_id` in `wrangler.jsonc` is the non-deployable `OPERATOR_MUST_SET_SECRETS_STORE_ID`: the real ID is account-specific, two Cloudflare accounts are visible from this environment and no `ANAS_*` secret exists in either, and the repo has no config-injection mechanism. Operator prerequisite.
+- `store_id` in `wrangler.jsonc` is the shared 首陽 `default_secrets_store` (`a2a4a60a…`, supplied by the operator, used by dev and main). `ANAS_PROD_BING_WEBMASTER_TOKEN` does not exist in that store yet (checked via `wrangler secrets-store secret list`).
 - NOT verified: real Secrets Store secret, real Bing API calls (no credential available; `GetUrlInfo` quoting and `GetPageStats` `Query` semantics remain unconfirmed), secret rotation, production Access.
