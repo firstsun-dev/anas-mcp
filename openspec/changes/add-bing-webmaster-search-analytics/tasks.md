@@ -1,11 +1,12 @@
 # Tasks: add Bing Webmaster and unified search analytics
 
 ## 1. Contract and configuration
-- [ ] Add the accepted search-provider requirements to `openspec/specs/analytics-mcp/spec.md` when implementation begins.
+- [x] Add the search-provider requirements as an OpenSpec delta under `openspec/changes/add-bing-webmaster-search-analytics/specs/analytics-mcp/spec.md`.
+- [ ] Merge the accepted delta into `openspec/specs/analytics-mcp/spec.md` only when the change is accepted/archived according to the project OpenSpec workflow.
 - [ ] Update `openspec/project.md` data-source strategy and roadmap to include Bing Webmaster and the provider-neutral search tool surface.
 - [ ] Document `BING_WEBMASTER_OAUTH_CREDENTIALS` ownership and bootstrap procedure in `docs/credentials.md` without including real values.
-- [ ] Confirm the currently supported Bing Webmaster JSON/HTTP production host and read-only OAuth flow against current Microsoft documentation before coding the client.
-- [ ] Confirm that `webmaster.read` is sufficient for all six initial read-only methods.
+- [x] Confirm the supported Bing Webmaster JSON/HTTP API and read-only OAuth model against current Microsoft documentation.
+- [x] Confirm `webmaster.read` is the intended read-only OAuth scope; live verification remains required before marking the integration complete.
 
 ## 2. Shared search analytics domain
 - [ ] Add shared provider/type definitions for `gsc | bing`.
@@ -17,7 +18,7 @@
 ## 3. Bing OAuth service
 - [ ] Add a Secrets Store binding for the Bing OAuth credential JSON without committing values or resource secrets.
 - [ ] Validate required credential fields at runtime.
-- [ ] Implement refresh-token exchange using the Bing Webmaster OAuth token endpoint.
+- [ ] Implement refresh-token exchange using the currently documented Bing Webmaster OAuth token endpoint.
 - [ ] Request/use only `webmaster.read`; reject configuration that requires a write-capable scope for the read-only tools.
 - [ ] Keep derived access tokens runtime-only and avoid logging token/credential content.
 - [ ] Add mocked tests for successful refresh, expiry, 401/403, malformed token responses, and redaction.
