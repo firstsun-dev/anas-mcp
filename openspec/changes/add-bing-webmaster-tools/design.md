@@ -161,6 +161,16 @@ Logical fields:
 
 A view or constrained query SHOULD make it straightforward for `anas-mcp` to select only rows belonging to the latest successful dataset for a site/dimension.
 
+## Implemented schema contract
+Migration `20260921030000_blog_analytics_bing.sql` in `firstsun-dev/windmill-flows` (database `windmill_pipeline`, schema `blog_analytics`):
+
+- `bing_fetch_runs`: one immutable row per provider call (`operation` = `user_sites | query_stats | page_stats`; `status` = `pending | success | throttled | provider_error | network_error | validation_failed`; `fetched_at`, `data_through`, `row_count`, `payload_hash`, sanitized `raw_payload`, redacted `safe_error_message`). At most one `success` per site/operation/Taipei-day.
+- `bing_sites`, `bing_search_stats` (`dimension` = `query | page`, `dimension_value`, `stat_date`, nullable metrics): normalized rows keyed by `fetch_run_id`.
+- Serving views (anas-mcp reads **only** these): `bing_latest_sites`, `bing_latest_search_runs` (one row per site/dimension: `fetch_run_id`, `fetched_at`, `data_through`), `bing_latest_search_stats`. They select the latest **successful** run, so a newer throttled/failed run never replaces or hides a previous good dataset, and `fetchedAt`/`dataThrough` always describe the dataset actually served.
+- The Hyperdrive role needs `USAGE` on schema `blog_analytics` and `SELECT` on those three views only (no base-table access).
+
+Staleness: `stale = true` when the served run was fetched more than 72h ago (`STALE_AFTER_HOURS`); `"unknown"` when `fetchedAt` is unavailable.
+
 ## Freshness contract
 Because Bing data is ingested asynchronously, MCP responses must expose freshness.
 
