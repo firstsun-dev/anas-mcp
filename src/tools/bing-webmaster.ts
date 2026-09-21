@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   BingWebmasterClient,
   BingWebmasterError,
+  isValidCalendarDate,
   parseSiteUrl,
   type BingQueryStatsRow,
 } from "../services/bing-webmaster";
@@ -15,7 +16,7 @@ export const MAX_OFFSET = 100_000;
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
 const siteUrlSchema = z.string().min(1).max(2048).describe("Bing Webmaster site URL, e.g. https://example.com/");
-const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
+const dateSchema = z.string().refine(isValidCalendarDate, "Use a real calendar date as YYYY-MM-DD");
 
 function ok(payload: Record<string, unknown>) {
   return {

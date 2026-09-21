@@ -19,4 +19,15 @@ describe("repository guardrails", () => {
     expect(w).toContain("secrets_store_secrets");
     expect(w).not.toMatch(/"vars"/);
   });
+  it("wrangler.jsonc explicitly disables outbound fetch tracing (Bing key is in the query string)", () => {
+    const w = read("wrangler.jsonc").replace(/^\s*\/\/.*$/gm, "");
+    const config = JSON.parse(w) as { observability?: { enabled?: boolean; traces?: { enabled?: boolean } } };
+    expect(config.observability?.enabled).toBe(true);
+    expect(config.observability?.traces?.enabled).toBe(false);
+  });
+  it("no Bing token value in wrangler config", () => {
+    const w = read("wrangler.jsonc").replace(/^\s*\/\/.*$/gm, "");
+    expect(w).not.toMatch(/apikey|api_key/i);
+    expect(w).not.toMatch(/"(BING_WEBMASTER_TOKEN)"\s*:\s*"/);
+  });
 });

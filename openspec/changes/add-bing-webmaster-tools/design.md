@@ -121,4 +121,6 @@ Because Microsoft documentation contains historical samples, implementation work
 - Do not return raw provider payloads by default.
 
 ## Observability
+Bing Webmaster API key is transmitted as a query parameter by the upstream API contract; automatic outbound fetch URL/query tracing must remain disabled unless the credential transport changes (`observability.traces.enabled: false` in `wrangler.jsonc`, enforced by `tests/repo-guardrails.test.ts`).
+
 Log only safe operation metadata such as tool name, upstream latency, status class, and bounded result counts. Do not log query rows, URL-level payloads, or credential material by default.

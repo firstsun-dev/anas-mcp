@@ -23,6 +23,7 @@
 - Google OAuth credentials are stored as one JSON credential in Cloudflare Secrets Store. Never commit credentials or log credential contents.
 - GA4 and Google Search Console provider credentials are stored in Cloudflare Secrets Store as the shared Google OAuth credential JSON. Never commit or log credential contents.
 - Bing Webmaster provider token/API key is stored in Cloudflare Secrets Store and must never be committed, logged, copied into CI, or returned to MCP clients.
+- Bing Webmaster API key is transmitted as a query parameter by the upstream API contract; automatic outbound fetch URL/query tracing must remain disabled unless the credential transport changes (`observability.traces.enabled: false` in `wrangler.jsonc`, enforced by `tests/repo-guardrails.test.ts`).
 - Derived short-lived Google access tokens are runtime-only and must not be persisted.
 - Cloudflare Access Managed OAuth token/session state is platform-managed and must not be duplicated into application storage.
 - PostgreSQL access must be read-only and use Cloudflare Hyperdrive when enabled. Database credentials are owned by Hyperdrive and must not be duplicated into Secrets Store.

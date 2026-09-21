@@ -89,12 +89,29 @@ describe("MCP tool behavior", () => {
     [{ siteUrl: "https://example.com/", limit: -5 }],
     [{ siteUrl: "https://example.com/", limit: 100000 }],
     [{ siteUrl: "https://example.com/", startDate: "2024-13-99x" }],
+    [{ siteUrl: "https://example.com/", startDate: "2026-02-30" }],
+    [{ siteUrl: "https://example.com/", endDate: "2026-13-01" }],
+    [{ siteUrl: "https://example.com/", startDate: "2026-00-10" }],
     [{ siteUrl: "https://example.com/", startDate: "2024-02-01", endDate: "2024-01-01" }],
   ])("rejects invalid search args %j without upstream call", async (args) => {
     const f = mockFetch(() => json({ d: [] }));
     const r = await callTool(envWithToken(), "bing_search_performance", args);
     const failed = r.json.error !== undefined || r.json.result?.isError === true;
     expect(failed).toBe(true);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("accepts leap day 2024-02-29", async () => {
+    mockFetch(() => json({ d: [] }));
+    const r = await callTool(envWithToken(), "bing_search_performance", { siteUrl: "https://example.com/", startDate: "2024-02-29", endDate: "2024-02-29" });
+    expect(r.json.result.isError).not.toBe(true);
+  });
+
+  it("url_info with userinfo -> validation, no upstream call", async () => {
+    const f = mockFetch(() => json({ d: {} }));
+    const r = await callTool(envWithToken(), "bing_url_info", { siteUrl: "https://example.com/", url: "https://user:pass@example.com/a" });
+    expect(r.json.result.isError).toBe(true);
+    expect(r.text).toContain("validation");
     expect(f).not.toHaveBeenCalled();
   });
 

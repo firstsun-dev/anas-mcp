@@ -4,16 +4,21 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
+  // Logs stay on. Traces MUST stay off: the Bing API key travels as ?apikey=<secret>, so automatic
+  // outbound fetch tracing could record it (see docs/credentials.md).
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "traces": {
+      "enabled": false
+    }
   },
   // Long-lived provider credentials come from Cloudflare Secrets Store (see docs/credentials.md).
-  // store_id is a non-secret identifier but account-specific: replace the placeholder with your
-  // Secrets Store ID (`wrangler secrets-store store list`) before deploying. Never put the token here.
+  // NOT DEPLOYABLE AS-IS: store_id is an account-specific, non-secret identifier that the operator
+  // must supply (`wrangler secrets-store store list`). The Bing token itself never goes in this file.
   "secrets_store_secrets": [
     {
       "binding": "BING_WEBMASTER_TOKEN",
-      "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
+      "store_id": "OPERATOR_MUST_SET_SECRETS_STORE_ID",
       "secret_name": "ANAS_PROD_BING_WEBMASTER_TOKEN"
     }
   ]

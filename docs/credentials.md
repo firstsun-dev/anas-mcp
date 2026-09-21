@@ -85,6 +85,8 @@ For opaque provider tokens such as Bing Webmaster:
 3. Attach it only to the verified Bing Webmaster upstream request.
 4. Do not copy it into application storage, CI variables, logs, telemetry, or MCP responses.
 
+Bing Webmaster API key is transmitted as a query parameter by the upstream API contract; automatic outbound fetch URL/query tracing must remain disabled unless the credential transport changes (`observability.traces.enabled: false` in `wrangler.jsonc`, enforced by `tests/repo-guardrails.test.ts`).
+
 ## Review checklist
 
 Before introducing any credential, answer:

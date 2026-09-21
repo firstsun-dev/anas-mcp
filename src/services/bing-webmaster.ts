@@ -136,6 +136,9 @@ export function assertUrlBelongsToSite(siteUrl: string, url: string): void {
   if (target.protocol !== "http:" && target.protocol !== "https:") {
     throw new BingWebmasterError("validation", "url must be an http(s) URL.");
   }
+  if (target.username || target.password) {
+    throw new BingWebmasterError("validation", "url must be an http(s) URL without credentials.");
+  }
   const samePath =
     site.pathname === "/" ||
     target.pathname === site.pathname ||
@@ -143,6 +146,17 @@ export function assertUrlBelongsToSite(siteUrl: string, url: string): void {
   if (target.origin !== site.origin || !samePath) {
     throw new BingWebmasterError("validation", "url must belong to the specified siteUrl.");
   }
+}
+
+/** True only for a real calendar date written as YYYY-MM-DD (rejects 2026-02-30, 2026-13-01, ...). */
+export function isValidCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  // setUTCFullYear (unlike Date.UTC) does not remap years 0-99 to 1900-1999.
+  const d = new Date(0);
+  d.setUTCFullYear(year, month - 1, day);
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
 }
 
 /** Parse the WCF JSON date format `/Date(1316156400000-0700)/` to ISO UTC. */

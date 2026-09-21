@@ -10,7 +10,7 @@
 ## Credential provisioning
 - [ ] Create/select the production Bing Webmaster provider token/API key.
 - [ ] Store the token in Cloudflare Secrets Store as the sole production source of truth.
-- [x] Add the production Secrets Store binding without committing real IDs or credential values.
+- [ ] Add the production Secrets Store binding without committing real IDs or credential values. (Binding syntax is in `wrangler.jsonc` and passes `wrangler deploy --dry-run`, but `store_id` is still the non-deployable `OPERATOR_MUST_SET_SECRETS_STORE_ID`; operator must supply the real store ID.)
 - [ ] Verify the Worker can read the token at runtime without exposing it to logs or tool responses.
 - [ ] Verify staging and production credentials can be rotated independently.
 
@@ -28,14 +28,15 @@
 
 ## Tests
 - [x] Add missing/empty-token and upstream authentication failure tests.
-- [x] Add request validation and result-bound tests.
+- [x] Add request validation (including real calendar-date and target-URL userinfo checks) and result-bound tests.
 - [x] Add provider error-mapping tests.
 - [x] Add tests proving write operations are not exposed.
 - [x] Add tests proving SOAP/POX endpoints are not referenced by the provider implementation.
 
 ## Verification
 - [x] Run the aggregate project check.
-- [ ] Validate the tools locally with MCP Inspector.
+- [x] Confirm `wrangler.jsonc` explicitly disables outbound fetch tracing and passes `wrangler deploy --dry-run`.
+- [x] Validate the tools locally with MCP Inspector.
 - [ ] Verify the Bing provider token is read only from Cloudflare Secrets Store and is never returned or logged.
 - [ ] Verify representative Bing site/search/URL reads against a real authorized site without logging private analytics payloads.
 - [ ] Verify production access still passes through Cloudflare Access Managed OAuth.
@@ -45,7 +46,8 @@ OpenSpec design added on 2026-09-21 and updated the same day to use a Cloudflare
 
 ### Implementation evidence (2026-09-21)
 - Bing REST/JSON contract verified from Microsoft Learn; recorded in `design.md`. Token/API-key model confirmed; no OpenSpec architecture change required.
-- `npm run check` (typecheck + vitest, 57 tests using mocked `fetch`) passes.
-- `npm run dev` (`wrangler dev`) started; raw JSON-RPC `tools/list` over `/mcp` returned `health`, `bing_list_sites`, `bing_search_performance`, `bing_url_info`; `bing_list_sites` without a bound secret returned a safe `missing_configuration` error.
-- Committed `wrangler.jsonc` uses a placeholder `store_id`; the operator must supply the real Secrets Store ID.
-- NOT verified: MCP Inspector (only curl JSON-RPC was used), a real Secrets Store secret, real Bing API calls, secret rotation, and production Access. Those tasks above remain unchecked.
+- `npm run check` (typecheck + vitest, 82 tests using mocked `fetch`) passes.
+- `wrangler deploy --dry-run` accepts `wrangler.jsonc` including `observability.traces.enabled: false` and the Secrets Store binding syntax.
+- `npm run dev` + MCP Inspector (`@modelcontextprotocol/inspector --cli`, streamable HTTP): `tools/list` shows `health`, `bing_list_sites`, `bing_search_performance`, `bing_url_info`. `bing_list_sites` without a bound secret returned only `missing_configuration` (no stack trace, token or raw binding error); `startDate=2026-02-30` is rejected by input validation.
+- `store_id` in `wrangler.jsonc` is the non-deployable `OPERATOR_MUST_SET_SECRETS_STORE_ID`: the real ID is account-specific, two Cloudflare accounts are visible from this environment and no `ANAS_*` secret exists in either, and the repo has no config-injection mechanism. Operator prerequisite.
+- NOT verified: real Secrets Store secret, real Bing API calls (no credential available; `GetUrlInfo` quoting and `GetPageStats` `Query` semantics remain unconfirmed), secret rotation, production Access.

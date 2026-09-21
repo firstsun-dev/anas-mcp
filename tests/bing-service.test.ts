@@ -3,6 +3,7 @@ import {
   BingWebmasterClient,
   BingWebmasterError,
   assertUrlBelongsToSite,
+  isValidCalendarDate,
   parseBingDate,
   redactSecrets,
   secretsStoreTokenProvider,
@@ -160,6 +161,27 @@ describe("validation", () => {
     await codeOf(client(f).urlInfo("https://example.com", "https://other-domain.com/foo"));
     expect(f).not.toHaveBeenCalled();
   });
+});
+
+describe("target url userinfo", () => {
+  it.each(["https://user@example.com/a", "https://user:password@example.com/a"])("rejects %s", (url) => {
+    expect(() => assertUrlBelongsToSite("https://example.com/", url)).toThrow(/without credentials/);
+  });
+  it("urlInfo with userinfo never reaches upstream", async () => {
+    const f = stub(json({ d: {} }));
+    expect(await codeOf(client(f).urlInfo("https://example.com/", "https://user:pass@example.com/a"))).toBe("validation");
+    expect(f).not.toHaveBeenCalled();
+  });
+});
+
+describe("isValidCalendarDate", () => {
+  it.each(["2026-02-30", "2026-02-31", "2026-13-01", "2026-00-10", "2026-04-31", "2026-01-00", "2025-02-29", "2026-1-01", "2026-01-01x", ""])(
+    "rejects %j",
+    (v) => expect(isValidCalendarDate(v)).toBe(false),
+  );
+  it.each(["2024-02-29", "2026-02-28", "2026-12-31", "2000-02-29", "0004-02-29"])("accepts %j", (v) =>
+    expect(isValidCalendarDate(v)).toBe(true),
+  );
 });
 
 describe("parseBingDate", () => {
