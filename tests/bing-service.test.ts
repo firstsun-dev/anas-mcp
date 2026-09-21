@@ -106,6 +106,7 @@ describe("provider requests", () => {
     [403, {}, "authentication"],
     [429, {}, "rate_limited"],
     [400, { ErrorCode: 4, Message: "ThrottleUser" }, "rate_limited"],
+    [400, { ErrorCode: 17, Message: "ERROR!!! ThrottleIP" }, "rate_limited"], // observed live 2026-09-21
     [500, { Message: `oops ${TOKEN}` }, "upstream"],
     [503, {}, "upstream"],
   ])("HTTP %s -> %s", async (status, body, code) => {
