@@ -74,6 +74,26 @@ Constraints:
 - read only
 - return a stable normalized subset rather than raw provider payloads
 
+## Verified REST/JSON contract (2026-09-21)
+Verified against Microsoft Learn (`bingwebmaster/api-protocols`, `getting-started`, and the `IWebmasterApi` method pages). The design's token/API-key assumption holds; no OAuth is needed. Microsoft states SOAP/POX are retired 2026-08-31 and JSON/HTTP is the supported replacement with the same API key.
+
+- Base: `https://ssl.bing.com/webmaster/api.svc/json/<Method>`; token passed as query parameter `apikey` (no header mechanism is documented). Because the token is in the URL, the service never logs URLs and redacts `apikey=` from all error text.
+- Success: HTTP 200 `{"d": ...}`. Provider error: HTTP 400 `{"ErrorCode": n, "Message": "..."}` (documented sample: `{"ErrorCode":3,"Message":"InvalidApiKey"}`).
+- Dates use the WCF format `/Date(ms-offset)/`.
+
+| MCP tool | Bing method | Params | Result fields used |
+| --- | --- | --- | --- |
+| `bing_list_sites` | `GetUserSites` | none | `Url`, `IsVerified` (`AuthenticationCode`, `DnsVerificationCode` are dropped) |
+| `bing_search_performance` (`dimension=query`) | `GetQueryStats` | `siteUrl` | `Query`, `Date`, `Impressions`, `Clicks`, `AvgClickPosition`, `AvgImpressionPosition` |
+| `bing_search_performance` (`dimension=page`) | `GetPageStats` | `siteUrl` | same fields; page URL is in `Query` |
+| `bing_url_info` | `GetUrlInfo` | `siteUrl`, `url` (JSON string literal per samples) | `Url`, `IsPage`, `HttpStatus`, `DocumentSize`, `AnchorCount`, `TotalChildUrlCount`, `DiscoveryDate`, `LastCrawledDate` |
+
+Findings that shape the tools:
+- The provider has no pagination, row-limit, or date parameters on these methods and refreshes data roughly weekly. `limit`/`offset` and the optional `startDate`/`endDate` are therefore applied by the service after retrieval (documented in the tool description); the service also caps provider rows processed.
+- Bing reports separate click and impression positions; both are preserved and missing values are `null`, not `0`.
+- Provider error `ErrorCode` names beyond `InvalidApiKey` are not documented on the pages consulted; mapping to auth/rate-limit also uses HTTP status and `Throttle`/`Quota` message patterns and should be confirmed against a live credential.
+- Not verified against a live Bing API: exact `GetUrlInfo` URL-parameter quoting and live error bodies.
+
 ## Write operations
 The initial provider intentionally excludes URL submission, Sitemap mutation, site configuration changes, and every other write-capable operation.
 
