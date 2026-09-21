@@ -135,36 +135,54 @@ The service SHALL query GA4 and Search Console directly through their Google API
 - THEN the service validates the request and queries the Search Console API
 
 
-### Requirement: Bing Webmaster direct API access
-The service SHALL query Bing Webmaster Tools directly through the Microsoft-supported REST/JSON API surface current at implementation time and SHALL keep the provider read-only.
+### Requirement: Bing Webmaster from PostgreSQL
+The service SHALL serve Bing Webmaster analytics from a PostgreSQL read model populated by `firstsun-dev/windmill-flows` and SHALL NOT query Bing Webmaster directly from the MCP request path.
+
+#### Scenario: Client requests Bing sites
+- WHEN a client invokes the Bing site-list tool
+- THEN the service reads the latest successful normalized Bing site dataset through a read-only Hyperdrive/PostgreSQL connection
+- AND returns only safe bounded site fields
+- AND does not call the Bing Webmaster API
 
 #### Scenario: Client requests Bing search performance
-- WHEN a client requests valid Bing search-performance data
-- THEN the service validates the site, requested result bounds, and supported filters before the upstream call
-- AND queries Bing Webmaster Tools directly
-- AND returns a bounded MCP response
+- WHEN a client requests valid Bing query/page search-performance data
+- THEN the service validates the site, requested date range, dimension, offset, and result bounds before SQL execution
+- AND uses a predefined parameterized query against the normalized Bing read model
+- AND returns a bounded MCP response with freshness metadata
+- AND does not call the Bing Webmaster API
 
-#### Scenario: Client requests Bing URL information
-- WHEN a client requests information for a URL under an authorized Bing Webmaster site
-- THEN the service validates the site and URL relationship before the upstream call
-- AND queries the supported read-only Bing Webmaster API operation
-- AND does not submit, modify, or delete provider data
-
-### Requirement: Bing Webmaster token credential
-The initial Bing Webmaster integration SHALL use a long-lived provider token/API key stored in Cloudflare Secrets Store as the sole production source of truth.
+### Requirement: Bing ingestion ownership
+Bing Webmaster provider calls and credentials SHALL be owned by `firstsun-dev/windmill-flows`, which populates the PostgreSQL read model consumed by `anas-mcp`.
 
 #### Scenario: Bing provider credential is provisioned
-- WHEN the Bing Webmaster provider is configured for `anas-mcp`
-- THEN the credential SHALL be stored in Cloudflare Secrets Store
-- AND the Worker SHALL retrieve it only at runtime
-- AND the credential SHALL NOT be copied into Wrangler `vars`, committed configuration, `.env`, `.dev.vars`, GitHub Actions, application databases, or logs
-- AND the credential SHALL NOT be returned in MCP tool results
-- AND no delegated user OAuth authorization-code or refresh-token state is required for the initial integration
+- WHEN the Bing Webmaster API key/token is configured
+- THEN the credential SHALL be stored in the protected Windmill credential path used by the ingestion runtime
+- AND `anas-mcp` SHALL NOT bind, store, log, or receive the Bing provider credential
+- AND the credential SHALL NOT be persisted in PostgreSQL or raw fetch payloads
 
-#### Scenario: A Bing write operation is proposed
-- WHEN an implementation proposes URL submission, Sitemap mutation, site configuration changes, or another write-capable Bing operation
-- THEN the change SHALL require a separate accepted OpenSpec change before implementation
-- AND the existing Bing MCP tools SHALL remain read-only regardless of the technical capabilities of the configured provider token
+#### Scenario: Bing provider throttles an ingestion run
+- WHEN Bing returns a throttling response such as HTTP 400 with `ErrorCode: 17 / ThrottleIP`
+- THEN the ingestion layer SHALL classify the run as throttled/rate-limited
+- AND apply bounded retry/backoff according to the ingestion policy
+- AND preserve failure evidence
+- AND SHALL NOT replace the latest successful dataset as though the throttled run were fresh
+
+### Requirement: Bing freshness is explicit
+Bing MCP responses SHALL expose freshness metadata for asynchronously ingested data.
+
+#### Scenario: Bing analytics are returned
+- WHEN `anas-mcp` returns Bing search-performance data
+- THEN the response SHALL include the latest successful ingestion timestamp represented by the result when known
+- AND the newest provider data date when known
+- AND SHALL expose stale/unknown freshness rather than fabricating current zero-traffic rows
+
+### Requirement: Bing URL information is deferred
+The initial Bing MCP surface SHALL NOT expose arbitrary request-time URL information lookups.
+
+#### Scenario: URL information is requested as a future capability
+- WHEN a design proposes `bing_url_info` or another arbitrary Bing URL lookup
+- THEN a separate accepted OpenSpec change SHALL define its cache/ingestion/on-demand execution strategy
+- AND the design SHALL avoid reintroducing direct Cloudflare Worker-to-Bing request-time dependency
 
 ### Requirement: Bing legacy protocols are prohibited
 The Bing integration SHALL NOT use the legacy SOAP or POX interfaces.
@@ -182,18 +200,13 @@ The service SHALL read Microsoft Clarity analytics from PostgreSQL data ingested
 - THEN the service reads the normalized `blog_analytics` data through a read-only PostgreSQL connection
 - AND no Clarity API quota is consumed
 
-### Requirement: Provider credentials are centralized in Secrets Store
-GA4, Google Search Console, and Bing Webmaster credentials consumed directly by `anas-mcp` SHALL use Cloudflare Secrets Store as their production source of truth.
+### Requirement: Direct provider credentials are centralized in Secrets Store
+Provider credentials consumed directly by `anas-mcp`, including GA4 and Google Search Console credentials, SHALL use Cloudflare Secrets Store as their production source of truth.
 
 #### Scenario: Google analytics/search credentials are configured
 - WHEN GA4 or Google Search Console tools need provider authorization
 - THEN the shared Google OAuth credential JSON SHALL be loaded from Cloudflare Secrets Store
 - AND derived short-lived Google access tokens SHALL remain runtime-only
-
-#### Scenario: Bing Webmaster credentials are configured
-- WHEN a Bing Webmaster tool needs provider authorization
-- THEN the Bing provider token/API key SHALL be loaded from Cloudflare Secrets Store
-- AND the token SHALL NOT be persisted or duplicated into another application store
 
 ### Requirement: Secrets Store first
 Every long-lived secret consumed directly by the `anas-mcp` Worker SHALL be sourced from Cloudflare Secrets Store whenever Cloudflare supports that secret type.
@@ -222,6 +235,13 @@ Google OAuth credentials SHALL be stored as one JSON credential in Cloudflare Se
 
 ### Requirement: Service-managed credential exceptions
 Credentials owned by platform integrations or other services SHALL remain with their owning service rather than being duplicated into `anas-mcp` Secrets Store.
+
+#### Scenario: Windmill ingests Bing Webmaster data
+- WHEN `firstsun-dev/windmill-flows` calls the Bing Webmaster API
+- THEN the Bing provider credential remains owned by the Windmill ingestion runtime
+- AND `anas-mcp` SHALL NOT duplicate the Bing API key/token into Cloudflare Secrets Store
+- AND MCP tools SHALL read the resulting PostgreSQL read model through Hyperdrive
+
 
 #### Scenario: Cloudflare Access authenticates MCP clients
 - WHEN Cloudflare Access Managed OAuth is used for `/mcp`

@@ -1,39 +1,49 @@
-# Proposal: add Bing Webmaster Tools
+# Proposal: ingest Bing Webmaster analytics through Windmill
 
 ## Why
-Firstsun needs Bing search and index visibility alongside GA4 and Google Search Console so ChatGPT can compare search performance across providers without introducing another ingestion pipeline. The provider must remain consistent with the existing read-only MCP, Secrets Store first, and bounded-tool design.
+Firstsun needs Bing search-performance visibility alongside GA4, Google Search Console, and Clarity, but direct request-time Bing access from Cloudflare Workers has proven operationally fragile. A live Worker call reached Bing successfully with the configured API key but returned `ErrorCode: 17 / ThrottleIP`, demonstrating that Cloudflare egress IP throttling can make MCP availability depend on the provider's IP-rate-limit behavior.
 
-The initial Firstsun deployment uses a long-lived Bing Webmaster provider token/API key owned by Firstsun and stored in Cloudflare Secrets Store. Because `anas-mcp` is a single-owner, server-side, read-only integration, delegated per-user Bing OAuth is not required for the initial provider. The integration still targets the supported REST/JSON interface and does not use legacy SOAP/POX protocols.
+Bing search-performance data is also provider-refreshed on a relatively slow cadence, so request-time API access provides little freshness benefit while adding latency, quota, egress-IP, and provider-availability risk.
+
+The integration should therefore follow the same separation already used for Clarity: scheduled ingestion in `firstsun-dev/windmill-flows`, persistence in PostgreSQL, and read-only serving from `anas-mcp` through Cloudflare Hyperdrive.
 
 ## What changes
-- Add Bing Webmaster Tools as a direct request-time analytics provider.
-- Use a Bing Webmaster provider token/API key for the initial server-side integration.
-- Store the Bing provider token in Cloudflare Secrets Store as the sole production source of truth.
-- Keep the MCP tool surface read-only even if the upstream credential is technically capable of additional operations.
-- Define read-only MCP tools for site discovery, search performance, and URL information.
-- Explicitly prohibit Bing write operations in the initial integration.
-- Explicitly prohibit legacy SOAP/POX implementations.
+- Move Bing Webmaster API ownership from `anas-mcp` to `firstsun-dev/windmill-flows`.
+- Store the Bing Webmaster provider token/API key with the Windmill ingestion runtime rather than in `anas-mcp` Cloudflare Secrets Store.
+- Add scheduled, bounded Bing ingestion that preserves fetch-run evidence and normalizes search-performance rows into PostgreSQL.
+- Make PostgreSQL the serving source for Bing MCP tools.
+- Keep `anas-mcp` read-only and query Bing data through Hyperdrive using constrained parameterized SQL.
+- Keep `bing_list_sites` and `bing_search_performance` as the initial MCP surface.
+- Defer `bing_url_info` from the initial scope because arbitrary URL lookup is inherently request-driven and would reintroduce provider throttling if naively proxied.
+- Expose freshness metadata so callers can distinguish stored Bing data from request-time provider data.
+- Preserve the existing prohibition on Bing write operations and legacy SOAP/POX integrations.
 
 ## Scope
+
 ### In scope
-- Provider authentication and credential ownership.
-- Direct Bing Webmaster API reads.
-- Bounded site/search-performance/URL-information tool contracts.
-- Validation, provider error mapping, and secret-safe telemetry.
+- Windmill-owned Bing API credential and provider calls.
+- Scheduled site/query/page statistics ingestion.
+- Raw-first or equivalent fetch-run evidence sufficient to diagnose provider failures and safely reprocess normalization.
+- PostgreSQL normalized read model under the existing analytics database/schema convention.
+- Hyperdrive-backed read-only MCP queries.
+- Bounded `bing_list_sites` and `bing_search_performance` responses.
+- Freshness metadata such as last successful fetch time and newest provider data date.
+- Explicit handling of provider throttling, including `ErrorCode: 17 / ThrottleIP`, in the ingestion layer.
 
 ### Out of scope
-- URL submission.
-- Sitemap submission or mutation.
-- Site ownership/configuration mutation.
-- Delegated per-user Bing OAuth for the initial deployment.
-- Provider write operations regardless of the technical capabilities of the configured token.
+- Direct Bing Webmaster API calls from `anas-mcp`.
+- A Bing API credential in `anas-mcp` Cloudflare Secrets Store.
+- `bing_url_info` in the initial MCP implementation.
+- On-demand Windmill-to-Bing calls from MCP requests.
+- URL submission, Sitemap mutation, site configuration, or other Bing write operations.
 - Legacy SOAP or POX integrations.
-- Persisting Bing analytics into PostgreSQL or another warehouse.
+- Treating unavailable/stale provider data as fresh or fabricating zero-valued rows.
 
 ## Success criteria
-- Bing provider remains read-only end to end.
-- The Bing provider token is sourced from Cloudflare Secrets Store and never logged or returned.
-- No OAuth authorization-code or refresh-token state is required for the initial Bing integration.
-- MCP responses are bounded and predictable.
-- No legacy SOAP/POX dependency is introduced.
-- Implementation can be independently reviewed after this OpenSpec change is accepted.
+- Bing provider failures or IP throttling do not make normal MCP reads fail when previously ingested data is available.
+- `anas-mcp` has no Bing provider credential and does not call Bing directly.
+- Windmill owns the Bing credential, retries/backoff, provider parsing, and persistence.
+- PostgreSQL contains enough provenance to identify the latest successful Bing fetch and the data date represented by normalized rows.
+- `bing_list_sites` and `bing_search_performance` read only from PostgreSQL through Hyperdrive.
+- MCP responses are bounded and include freshness metadata.
+- `bing_url_info` remains deferred until a separate accepted design defines caching/on-demand behavior without recreating the current throttling risk.

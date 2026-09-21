@@ -14,20 +14,20 @@
 - Do not copy/fork `wrangler versions upload/deploy`, shared rollback logic, or generic Cloudflare pipeline steps into this repository to bypass the central workflow. Generic CI improvements belong in `firstsun-dev/.github`.
 - GA4 is queried through the Google Analytics Data API.
 - Google Search Console is queried through the Search Console API.
-- Bing Webmaster Tools is queried directly through its supported REST/JSON API surface using a provider token/API key loaded from Cloudflare Secrets Store at runtime.
-- Keep Bing MCP tools read-only even if the upstream token is technically capable of writes. Do not use Bing Webmaster legacy SOAP/POX integrations or write-oriented endpoints unless a future accepted OpenSpec change explicitly requires them.
+- Bing Webmaster Tools is ingested by `firstsun-dev/windmill-flows`; `anas-mcp` reads normalized Bing data from PostgreSQL through read-only Hyperdrive and must not call Bing directly.
+- The Bing Webmaster provider credential is owned by Windmill, not Cloudflare Secrets Store for `anas-mcp`. Keep Bing MCP tools read-only and do not use legacy SOAP/POX or write-oriented endpoints unless a future accepted OpenSpec change explicitly requires them.
+- Initial Bing MCP scope is `bing_list_sites` and `bing_search_performance`; `bing_url_info` is deferred until a separate accepted design defines bounded cache/on-demand behavior.
 - Microsoft Clarity is never queried directly from this service. Read normalized Clarity data from PostgreSQL populated by `firstsun-dev/windmill-flows`.
 - **Secrets Store first:** every long-lived secret consumed directly by `anas-mcp` MUST come from Cloudflare Secrets Store whenever the platform supports it. See `docs/credentials.md`.
 - Never put production secrets in Wrangler `vars`, committed files, `.env`, `.dev.vars`, source code, or logs.
 - Do not use `wrangler secret` for a production credential when Secrets Store can provide it. Any fallback requires an accepted OpenSpec change documenting the limitation.
 - Google OAuth credentials are stored as one JSON credential in Cloudflare Secrets Store. Never commit credentials or log credential contents.
 - GA4 and Google Search Console provider credentials are stored in Cloudflare Secrets Store as the shared Google OAuth credential JSON. Never commit or log credential contents.
-- Bing Webmaster provider token/API key is stored in Cloudflare Secrets Store and must never be committed, logged, copied into CI, or returned to MCP clients.
-- Bing Webmaster API key is transmitted as a query parameter by the upstream API contract; automatic outbound fetch URL/query tracing must remain disabled unless the credential transport changes (`observability.traces.enabled: false` in `wrangler.jsonc`, enforced by `tests/repo-guardrails.test.ts`).
+- Bing Webmaster provider credentials remain owned by `firstsun-dev/windmill-flows` and must not be copied into this service or its Cloudflare Secrets Store.
 - Derived short-lived Google access tokens are runtime-only and must not be persisted.
 - Cloudflare Access Managed OAuth token/session state is platform-managed and must not be duplicated into application storage.
 - PostgreSQL access must be read-only and use Cloudflare Hyperdrive when enabled. Database credentials are owned by Hyperdrive and must not be duplicated into Secrets Store.
-- The Clarity API token remains owned by `firstsun-dev/windmill-flows` and must not be copied into this service.
+- The Bing Webmaster and Clarity upstream credentials remain owned by `firstsun-dev/windmill-flows` and must not be copied into this service.
 - CI bootstrap credentials required to deploy to Cloudflare may live in the protected GitHub Actions mechanism expected by the centralized workflow; do not copy runtime provider credentials into CI solely for deployment.
 - Never expose a generic SQL execution MCP tool. MCP tools must use constrained inputs and parameterized queries.
 - Do not add D1, Durable Objects, Containers, Queues, or other infrastructure unless an accepted OpenSpec change requires them.

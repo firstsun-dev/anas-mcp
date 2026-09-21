@@ -1,54 +1,68 @@
-# Tasks: Bing Webmaster Tools provider
+# Tasks: Bing Webmaster ingestion and PostgreSQL serving
 
-## OpenSpec and architecture
-- [x] Add the Bing Webmaster provider proposal and design.
-- [x] Add baseline analytics MCP requirements for Bing read access.
-- [x] Record a Secrets Store-backed Bing provider token/API key as the initial server-side credential model.
-- [x] Record REST/JSON-only integration and prohibit legacy SOAP/POX.
-- [x] Record write operations as out of scope for the initial provider.
+## Architecture
+- [x] Record Bing as an analytics source.
+- [x] Record REST/JSON-only provider access and prohibit legacy SOAP/POX.
+- [x] Record write operations as out of scope.
+- [x] Record the architectural change from direct Worker access to Windmill ingestion + PostgreSQL serving.
+- [x] Record `bing_url_info` as deferred from the initial implementation.
+- [x] Record the live `ErrorCode: 17 / ThrottleIP` observation that motivated the ingestion boundary.
 
-## Credential provisioning
-- [ ] Create/select the production Bing Webmaster provider token/API key.
-- [ ] Store the token in Cloudflare Secrets Store as the sole production source of truth.
-- [x] Add the production Secrets Store binding without committing real IDs or credential values. (Binding uses the shared 首陽 `default_secrets_store` ID, a non-secret identifier; the secret itself is not yet created.)
-- [ ] Verify the Worker can read the token at runtime without exposing it to logs or tool responses.
-- [ ] Verify staging and production credentials can be rotated independently.
+## Windmill credential and provider ownership
+- [ ] Move/remove Bing provider credential ownership from `anas-mcp`.
+- [ ] Configure the Bing Webmaster API key in the protected Windmill credential path.
+- [ ] Ensure the credential is never written to PostgreSQL, logs, raw payloads, or MCP output.
+- [ ] Verify rotation can occur without deploying `anas-mcp`.
 
-## Provider services
-- [x] Implement `services/bing-webmaster.ts` with Secrets Store token loading and the Microsoft-supported REST/JSON API surface current at implementation time.
-- [x] Confirm no SOAP or POX endpoint is used.
-- [x] Add provider error normalization and secret redaction.
+## PostgreSQL migration
+- [ ] Add a Windmill-owned migration for Bing fetch-run/provenance storage.
+- [ ] Add a normalized Bing site read model.
+- [ ] Add a normalized Bing query/page search-performance read model.
+- [ ] Define indexes/constraints for site, dimension, stat date, and latest-success lookup.
+- [ ] Ensure failed/throttled runs cannot masquerade as successful/fresh data.
+- [ ] Add migration tests/verification using the repository's normal Atlas workflow.
 
-## MCP tools
-- [x] Implement `bing_list_sites`.
-- [x] Implement `bing_search_performance`.
-- [x] Implement `bing_url_info`.
-- [x] Add bounded inputs/outputs and URL/site validation.
-- [x] Ensure site-list responses do not expose verification/authentication codes returned by upstream APIs.
+## Windmill ingestion
+- [ ] Implement a scheduled Bing sync job in `firstsun-dev/windmill-flows`.
+- [ ] Fetch authorized sites with `GetUserSites`.
+- [ ] Fetch query statistics with `GetQueryStats`.
+- [ ] Fetch page statistics with `GetPageStats`.
+- [ ] Classify HTTP 400 / `ErrorCode: 17 / ThrottleIP` as provider throttling.
+- [ ] Add bounded exponential backoff/retry behavior.
+- [ ] Persist failed/throttled fetch-run evidence without replacing the last successful dataset.
+- [ ] Preserve safe raw/fetch-run evidence sufficient for reprocessing.
+- [ ] Normalize provider rows into PostgreSQL.
+- [ ] Add deterministic mocked tests for provider responses, throttling, malformed data, normalization, and secret redaction.
+- [ ] Run the sync against a real authorized Bing site from the Windmill runtime and record sanitized evidence.
+
+## anas-mcp data access
+- [ ] Remove direct Bing HTTP/provider client code from the Worker.
+- [ ] Remove `BING_WEBMASTER_TOKEN` / Bing Secrets Store binding from `anas-mcp`.
+- [ ] Add/read the existing read-only Hyperdrive binding used for analytics PostgreSQL.
+- [ ] Implement constrained parameterized PostgreSQL query paths for Bing.
+- [ ] Implement `bing_list_sites` from the PostgreSQL read model.
+- [ ] Implement `bing_search_performance` from the PostgreSQL read model.
+- [ ] Remove/defer `bing_url_info` from the initial registered MCP surface.
+- [ ] Add bounded inputs/outputs and date/site validation.
+- [ ] Return `fetchedAt`, `dataThrough`, and staleness metadata.
+- [ ] Ensure no generic SQL execution tool is introduced.
 
 ## Tests
-- [x] Add missing/empty-token and upstream authentication failure tests.
-- [x] Add request validation (including real calendar-date and target-URL userinfo checks) and result-bound tests.
-- [x] Add provider error-mapping tests.
-- [x] Add tests proving write operations are not exposed.
-- [x] Add tests proving SOAP/POX endpoints are not referenced by the provider implementation.
+- [ ] Add repository/query-layer tests for latest-success selection.
+- [ ] Add site-list bounds and safe-field tests.
+- [ ] Add query/page search-performance filtering and pagination tests.
+- [ ] Add freshness/staleness metadata tests.
+- [ ] Add no-data-yet and database-failure tests.
+- [ ] Add tests proving no direct Bing fetch/API-key code remains in `anas-mcp`.
+- [ ] Add tests proving `bing_url_info` is not exposed in the initial tool list.
 
 ## Verification
-- [x] Run the aggregate project check.
-- [x] Confirm `wrangler.jsonc` explicitly disables outbound fetch tracing and passes `wrangler deploy --dry-run`.
-- [x] Validate the tools locally with MCP Inspector.
-- [ ] Verify the Bing provider token is read only from Cloudflare Secrets Store and is never returned or logged.
-- [ ] Verify representative Bing site/search/URL reads against a real authorized site without logging private analytics payloads.
-- [ ] Verify production access still passes through Cloudflare Access Managed OAuth.
+- [ ] Run `npm run check` in `anas-mcp`.
+- [ ] Validate the resulting MCP tool list with MCP Inspector.
+- [ ] Verify `bing_list_sites` reads persisted Windmill-ingested data.
+- [ ] Verify query and page dimensions against a real ingested dataset.
+- [ ] Verify a throttled Windmill fetch leaves the last successful MCP dataset available and reports correct freshness.
+- [ ] Verify production MCP access still passes through Cloudflare Access Managed OAuth.
 
-## Verification evidence
-OpenSpec design added on 2026-09-21 and updated the same day to use a Cloudflare Secrets Store-backed Bing provider token/API key for the initial Firstsun server-side deployment. The MCP provider remains read-only and legacy SOAP/POX integration remains prohibited. Runtime/provider implementation remains pending and must not be marked complete until tested.
-
-### Implementation evidence (2026-09-21)
-- Bing REST/JSON contract verified from Microsoft Learn; recorded in `design.md`. Token/API-key model confirmed; no OpenSpec architecture change required.
-- `npm run check` (typecheck + vitest, 82 tests using mocked `fetch`) passes.
-- `wrangler deploy --dry-run` accepts `wrangler.jsonc` including `observability.traces.enabled: false` and the Secrets Store binding syntax.
-- `npm run dev` + MCP Inspector (`@modelcontextprotocol/inspector --cli`, streamable HTTP): `tools/list` shows `health`, `bing_list_sites`, `bing_search_performance`, `bing_url_info`. `bing_list_sites` without a bound secret returned only `missing_configuration` (no stack trace, token or raw binding error); `startDate=2026-02-30` is rejected by input validation.
-- `store_id` in `wrangler.jsonc` is the shared 首陽 `default_secrets_store` (`a2a4a60a…`, supplied by the operator, used by dev and main). `ANAS_PROD_BING_WEBMASTER_TOKEN` does not exist in that store yet (checked via `wrangler secrets-store secret list`).
-- NOT verified: real Secrets Store secret, real Bing API calls (no credential available; `GetUrlInfo` quoting and `GetPageStats` `Query` semantics remain unconfirmed), secret rotation, production Access.
-- Live attempt (2026-09-21, `wrangler dev --remote`, real Secrets Store binding): the Worker read `ANAS_PROD_BING_WEBMASTER_TOKEN` (no `missing_configuration`) and `GetUserSites` reached Bing, which answered HTTP 400 `{"ErrorCode":17,"Message":"ERROR!!! ThrottleIP"}` on every retry over several minutes, mapped to `rate_limited`. Bing was throttling the Cloudflare preview egress IP, so no site/stats/URL-info payload was obtained. Live site/search/URL smoke remains pending.
+## Superseded implementation evidence
+The earlier direct-Worker implementation demonstrated that the Worker could read the Cloudflare-bound Bing secret and reach Bing, but the provider returned HTTP 400 `{"ErrorCode":17,"Message":"ERROR!!! ThrottleIP"}` from Cloudflare egress. That direct provider implementation is now superseded by this ingestion architecture and must not be merged as the final runtime design.
