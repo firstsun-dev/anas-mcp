@@ -9,6 +9,7 @@ Any long-lived secret that is consumed directly by the `anas-mcp` Worker MUST be
 Examples include:
 
 - Google OAuth credential JSON
+- Bing Webmaster OAuth credential JSON (client ID, client secret, refresh-token material, and token endpoint metadata as required)
 - OAuth client secrets owned by `anas-mcp`
 - API tokens used directly by `anas-mcp`
 - application signing/encryption secrets owned by `anas-mcp`
@@ -44,6 +45,7 @@ The following may use Wrangler `vars` when they are not sensitive:
 
 - GA4 property ID
 - Search Console site URL
+- Bing Webmaster site URL
 - feature flags that contain no credential material
 - safe limits and defaults
 - environment names
@@ -56,6 +58,7 @@ Prefer names that identify application, environment, and purpose, for example:
 
 ```text
 ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS
+ANAS_PROD_BING_WEBMASTER_OAUTH_CREDENTIALS
 ANAS_STAGING_GOOGLE_OAUTH_CREDENTIALS
 ANAS_PROD_MCP_OAUTH_CLIENT_SECRET
 ```

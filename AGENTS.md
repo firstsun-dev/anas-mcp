@@ -14,11 +14,14 @@
 - Do not copy/fork `wrangler versions upload/deploy`, shared rollback logic, or generic Cloudflare pipeline steps into this repository to bypass the central workflow. Generic CI improvements belong in `firstsun-dev/.github`.
 - GA4 is queried through the Google Analytics Data API.
 - Google Search Console is queried through the Search Console API.
+- Bing Webmaster Tools is queried directly through its supported REST/JSON API surface using read-only OAuth scope `Webmaster.read`.
+- Do not use Bing Webmaster legacy SOAP/POX integrations, write-oriented endpoints, or `Webmaster.manage` unless a future accepted OpenSpec change explicitly requires them.
 - Microsoft Clarity is never queried directly from this service. Read normalized Clarity data from PostgreSQL populated by `firstsun-dev/windmill-flows`.
 - **Secrets Store first:** every long-lived secret consumed directly by `anas-mcp` MUST come from Cloudflare Secrets Store whenever the platform supports it. See `docs/credentials.md`.
 - Never put production secrets in Wrangler `vars`, committed files, `.env`, `.dev.vars`, source code, or logs.
 - Do not use `wrangler secret` for a production credential when Secrets Store can provide it. Any fallback requires an accepted OpenSpec change documenting the limitation.
 - Google OAuth credentials are stored as one JSON credential in Cloudflare Secrets Store. Never commit credentials or log credential contents.
+- Bing Webmaster OAuth credentials are stored as one JSON credential in Cloudflare Secrets Store and must use the least-privilege read scope. Never commit or log credential contents.
 - Derived short-lived provider access tokens are runtime-only and must not be persisted.
 - Cloudflare Access Managed OAuth token/session state is platform-managed and must not be duplicated into application storage.
 - PostgreSQL access must be read-only and use Cloudflare Hyperdrive when enabled. Database credentials are owned by Hyperdrive and must not be duplicated into Secrets Store.

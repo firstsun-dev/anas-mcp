@@ -58,6 +58,13 @@ This decision is specified in `openspec/changes/adopt-openapi-http-contract/` an
 - Access pattern: direct API query at MCP request time.
 - Rationale: expose query/page SEO analysis without making Windmill a mandatory hop.
 
+### Bing Webmaster Tools
+- Source: Bing Webmaster API using the Microsoft-supported REST/JSON interface current at implementation time.
+- Access pattern: direct API query at MCP request time.
+- Authentication: OAuth 2.0 with least-privilege `Webmaster.read`; long-lived credential material lives in Cloudflare Secrets Store and derived access tokens remain runtime-only.
+- Rationale: expose Bing search/index diagnostics alongside Google Search Console without introducing another ingestion pipeline.
+- Guardrail: do not implement legacy SOAP/POX integrations or write operations such as URL/Sitemap submission in the initial provider.
+
 ### Microsoft Clarity
 - Source: PostgreSQL schema `blog_analytics`, populated by `firstsun-dev/windmill-flows`.
 - Access pattern: read-only SQL through Cloudflare Hyperdrive.
@@ -69,6 +76,7 @@ This decision is specified in `openspec/changes/adopt-openapi-http-contract/` an
 
 - Any long-lived secret consumed directly by the Worker MUST come from Cloudflare Secrets Store whenever supported.
 - Google OAuth credential is one JSON document stored in Cloudflare Secrets Store.
+- Bing Webmaster OAuth credential is one JSON document stored in Cloudflare Secrets Store and is authorized with the read-only `Webmaster.read` scope.
 - Future API tokens, OAuth client secrets, signing keys, or encryption keys consumed directly by `anas-mcp` also belong in Secrets Store by default.
 - Production secrets MUST NOT use Wrangler `vars`, committed configuration, `.env`, `.dev.vars`, source code, or logs.
 - `wrangler secret` is not the preferred production store; using it when Secrets Store is available requires an accepted OpenSpec exception.
@@ -95,6 +103,8 @@ Cloudflare Worker: anas-mcp
         +--> GA4 Data API
         |
         +--> Search Console API
+        |
+        +--> Bing Webmaster API
         |
         +--> Hyperdrive --> PostgreSQL --> blog_analytics Clarity data
 ```
@@ -152,5 +162,6 @@ MCP tool contracts
 5. Cloudflare Secrets Store binding and Google OAuth credential loading/access-token exchange.
 6. GA4 generic report, realtime, and metadata tools.
 7. Search Console analytics, URL inspection, and site-list tools.
-8. Hyperdrive-backed Clarity overview/page tools.
-9. Cross-source analytical workflows only after repeated usage patterns justify dedicated tools.
+8. Bing Webmaster site-list, search-performance, and URL-information tools.
+9. Hyperdrive-backed Clarity overview/page tools.
+10. Cross-source analytical workflows only after repeated usage patterns justify dedicated tools.

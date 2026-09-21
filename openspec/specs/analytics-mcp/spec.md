@@ -119,7 +119,7 @@ The service SHALL expose analytics data only through read-only operations.
 
 #### Scenario: Client requests analytics
 - WHEN a client invokes an analytics tool
-- THEN the service may read from GA4, Search Console, or the Clarity PostgreSQL read model
+- THEN the service may read from GA4, Search Console, Bing Webmaster Tools, or the Clarity PostgreSQL read model
 - AND it SHALL NOT mutate provider or database data
 
 ### Requirement: Google direct API access
@@ -133,6 +133,44 @@ The service SHALL query GA4 and Search Console directly through their Google API
 #### Scenario: Search Console request
 - WHEN a client requests valid Search Console analytics
 - THEN the service validates the request and queries the Search Console API
+
+
+### Requirement: Bing Webmaster direct API access
+The service SHALL query Bing Webmaster Tools directly through the Microsoft-supported REST/JSON API surface current at implementation time and SHALL keep the provider read-only.
+
+#### Scenario: Client requests Bing search performance
+- WHEN a client requests valid Bing search-performance data
+- THEN the service validates the site, requested result bounds, and supported filters before the upstream call
+- AND queries Bing Webmaster Tools directly
+- AND returns a bounded MCP response
+
+#### Scenario: Client requests Bing URL information
+- WHEN a client requests information for a URL under an authorized Bing Webmaster site
+- THEN the service validates the site and URL relationship before the upstream call
+- AND queries the supported read-only Bing Webmaster API operation
+- AND does not submit, modify, or delete provider data
+
+### Requirement: Bing Webmaster least-privilege OAuth
+Bing Webmaster provider access SHALL use OAuth 2.0 with the read-only `Webmaster.read` scope for the initial integration.
+
+#### Scenario: Bing provider authorization is provisioned
+- WHEN credentials are created for `anas-mcp`
+- THEN only the permissions required for read access SHALL be granted
+- AND `Webmaster.manage` SHALL NOT be requested for the initial read-only integration
+- AND provider client credentials plus refresh-token material SHALL be stored in Cloudflare Secrets Store
+- AND derived access tokens SHALL remain runtime-only
+
+#### Scenario: A Bing write operation is proposed
+- WHEN an implementation proposes URL submission, Sitemap mutation, site configuration changes, or another write-capable Bing operation
+- THEN the change SHALL require a separate accepted OpenSpec change before implementation
+
+### Requirement: Bing legacy protocols are prohibited
+The Bing integration SHALL NOT use the legacy SOAP or POX interfaces.
+
+#### Scenario: Bing API client is implemented
+- WHEN the provider service is added
+- THEN it SHALL use the supported REST/JSON interface documented by Microsoft at implementation time
+- AND it SHALL NOT depend on SOAP or POX endpoints
 
 ### Requirement: Clarity from PostgreSQL
 The service SHALL read Microsoft Clarity analytics from PostgreSQL data ingested by `firstsun-dev/windmill-flows` and SHALL NOT call the Microsoft Clarity API.
