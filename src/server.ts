@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { BingWebmasterClient, secretsStoreTokenProvider } from "./services/bing-webmaster";
+import { BingAnalyticsRepository, hyperdriveRunner } from "./services/bing-analytics";
 import { registerBingWebmasterTools } from "./tools/bing-webmaster";
 import type { Env } from "./index";
 
@@ -31,10 +31,7 @@ export function createServer(env: Env = {}) {
     }),
   );
 
-  registerBingWebmasterTools(
-    server,
-    new BingWebmasterClient({ getToken: secretsStoreTokenProvider(env.BING_WEBMASTER_TOKEN) }),
-  );
+  registerBingWebmasterTools(server, new BingAnalyticsRepository(hyperdriveRunner(env.ANALYTICS_DB)));
 
   return server;
 }

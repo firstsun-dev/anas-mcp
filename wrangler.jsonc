@@ -4,22 +4,17 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-08",
   "compatibility_flags": ["nodejs_compat"],
-  // Logs stay on. Traces MUST stay off: the Bing API key travels as ?apikey=<secret>, so automatic
-  // outbound fetch tracing could record it (see docs/credentials.md).
   "observability": {
-    "enabled": true,
-    "traces": {
-      "enabled": false
-    }
+    "enabled": true
   },
-  // Long-lived provider credentials come from Cloudflare Secrets Store (see docs/credentials.md).
-  // store_id is the non-secret ID of the shared default_secrets_store in the 首陽 account (dev and main).
-  // The secret must exist in that store before deploy; the Bing token itself never goes in this file.
-  "secrets_store_secrets": [
+  // Read-only PostgreSQL access (Windmill-ingested blog_analytics data). The database credential is owned by
+  // the Hyperdrive configuration and must never be copied into this file or Secrets Store.
+  // The id below is a placeholder: the operator must replace it with the real Hyperdrive config id before deploy.
+  // Local dev: set WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_ANALYTICS_DB to a local Postgres URL.
+  "hyperdrive": [
     {
-      "binding": "BING_WEBMASTER_TOKEN",
-      "store_id": "a2a4a60a04b142d3a0c7d482542e67fc",
-      "secret_name": "ANAS_PROD_BING_WEBMASTER_TOKEN"
+      "binding": "ANALYTICS_DB",
+      "id": "00000000000000000000000000000000"
     }
   ]
 }

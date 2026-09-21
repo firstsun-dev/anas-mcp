@@ -16,6 +16,3 @@ export async function mcpCall(env: Env, method: string, params: Record<string, u
   const dataLine = text.split("\n").find((l) => l.startsWith("data:"));
   return { status: res.status, text, json: JSON.parse(dataLine ? dataLine.slice(5) : text) };
 }
-
-export const TOKEN = "test-token-SECRET-123";
-export const envWithToken = (token = TOKEN): Env => ({ BING_WEBMASTER_TOKEN: { get: async () => token } });

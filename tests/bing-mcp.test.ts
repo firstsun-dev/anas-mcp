@@ -1,150 +1,131 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { TOKEN, envWithToken, mcpCall } from "./helpers";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/index";
+import { mcpCall } from "./helpers";
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+// Fake pg driver so requests go through the real worker -> MCP -> repository -> hyperdriveRunner path.
+const db = vi.hoisted(() => ({
+  statements: [] as string[],
+  handler: ((_text: string, _values: unknown[]) => []) as (text: string, values: unknown[]) => Record<string, unknown>[],
+  connectError: undefined as Error | undefined,
+  connectionString: undefined as string | undefined,
+}));
+vi.mock("pg", () => ({
+  Client: class {
+    constructor(config: { connectionString: string }) {
+      db.connectionString = config.connectionString;
+    }
+    async connect() {
+      if (db.connectError) throw db.connectError;
+    }
+    async query(text: string, values: unknown[] = []) {
+      db.statements.push(text.trim().split(/\s+/)[0]);
+      if (/^(BEGIN|COMMIT|ROLLBACK)/.test(text)) return { rows: [] };
+      return { rows: db.handler(text, values) };
+    }
+    async end() {}
+  },
+}));
 
-function mockFetch(res: () => Response) {
-  const f = vi.fn(async () => res());
-  vi.stubGlobal("fetch", f);
-  return f;
-}
-afterEach(() => vi.unstubAllGlobals());
+const env: Env = { ANALYTICS_DB: { connectionString: "postgres://hyperdrive.invalid/db" } as unknown as Hyperdrive };
+const call = (name: string, args: Record<string, unknown>, e: Env = env) => mcpCall(e, "tools/call", { name, arguments: args });
+const SITE = "https://example.com/";
 
-async function callTool(env: Env, name: string, args: Record<string, unknown>) {
-  const r = await mcpCall(env, "tools/call", { name, arguments: args });
-  return r;
-}
+beforeEach(() => {
+  db.statements = [];
+  db.connectError = undefined;
+  db.handler = () => [];
+});
 
 describe("MCP tool registration", () => {
-  it("lists health and the three read-only Bing tools", async () => {
-    const r = await mcpCall(envWithToken(), "tools/list");
-    const names = r.json.result.tools.map((t: any) => t.name).sort();
-    expect(names).toEqual(["bing_list_sites", "bing_search_performance", "bing_url_info", "health"]);
-    for (const t of r.json.result.tools.filter((t: any) => t.name.startsWith("bing_"))) {
-      expect(t.annotations.readOnlyHint).toBe(true);
-    }
+  it("lists exactly health, bing_list_sites, bing_search_performance", async () => {
+    const r = await mcpCall(env, "tools/list");
+    const tools = r.json.result.tools;
+    expect(tools.map((t: any) => t.name).sort()).toEqual(["bing_list_sites", "bing_search_performance", "health"]);
+    for (const t of tools.filter((t: any) => t.name.startsWith("bing_"))) expect(t.annotations.readOnlyHint).toBe(true);
   });
-  it("exposes no write or generic-request tools", async () => {
-    const r = await mcpCall(envWithToken(), "tools/list");
-    const names: string[] = r.json.result.tools.map((t: any) => t.name);
-    for (const n of names) expect(n).not.toMatch(/submit|delete|update|create|sitemap|add|remove|verify|configure|request/i);
+  it("exposes no bing_url_info, write, or generic SQL tools", async () => {
+    const names: string[] = (await mcpCall(env, "tools/list")).json.result.tools.map((t: any) => t.name);
+    expect(names).not.toContain("bing_url_info");
+    for (const n of names) expect(n).not.toMatch(/submit|delete|update|create|sitemap|add|remove|verify|configure|request|sql|query|execute/i);
   });
-  it("no HTTP route beyond /health and /mcp was added", async () => {
+  it("adds no HTTP route beyond /health and /mcp", async () => {
     const { default: worker } = await import("../src/index");
     const res = await worker.fetch(new Request("http://localhost/bing"), {}, {} as ExecutionContext);
     expect(res.status).not.toBe(200);
   });
 });
 
-describe("MCP tool behavior", () => {
-  it("bing_list_sites returns normalized sites, no verification codes or token", async () => {
-    mockFetch(() => json({ d: [{ AuthenticationCode: "AUTHSECRET", DnsVerificationCode: "DNSSECRET", IsVerified: true, Url: "https://example.com/" }] }));
-    const r = await callTool(envWithToken(), "bing_list_sites", {});
-    expect(r.json.result.structuredContent.sites).toEqual([{ url: "https://example.com/", isVerified: true }]);
-    expect(r.text).not.toMatch(/SECRET|test-token/);
+describe("bing_list_sites", () => {
+  it("serves persisted sites with freshness and no verification codes", async () => {
+    db.handler = () => [{ site_url: SITE, is_verified: true, fetched_at: new Date() }];
+    const r = await call("bing_list_sites", {});
+    const out = r.json.result.structuredContent;
+    expect(out.sites).toEqual([{ url: SITE, isVerified: true }]);
+    expect(out.freshness).toMatchObject({ stale: false, dataThrough: null });
+    expect(out.freshness.fetchedAt).toEqual(expect.any(String));
+    expect(r.text).not.toMatch(/AuthenticationCode|DnsVerificationCode/);
+    expect(db.connectionString).toBe("postgres://hyperdrive.invalid/db");
   });
 
-  it("bing_search_performance returns bounded rows with offset/truncation", async () => {
-    const d = Array.from({ length: 30 }, (_, i) => ({ Query: `q${i}`, Date: "/Date(1316156400000-0700)/", Impressions: i, Clicks: 1, AvgClickPosition: 2, AvgImpressionPosition: 3 }));
-    mockFetch(() => json({ d }));
-    const r = await callTool(envWithToken(), "bing_search_performance", { siteUrl: "https://example.com/", limit: 10, offset: 5 });
-    const sc = r.json.result.structuredContent;
-    expect(sc.rows).toHaveLength(10);
-    expect(sc.rows[0].query).toBe("q5");
-    expect(sc.totalRows).toBe(30);
-    expect(sc.truncated).toBe(true);
+  it("runs inside a read-only transaction", async () => {
+    db.handler = () => [{ site_url: SITE, is_verified: true, fetched_at: new Date() }];
+    await call("bing_list_sites", {});
+    expect(db.statements).toEqual(["BEGIN", "SELECT", "COMMIT"]);
   });
 
-  it("date range filters on provider row date", async () => {
-    mockFetch(() => json({ d: [
-      { Query: "a", Date: "/Date(1316156400000-0700)/", Impressions: 1 },
-      { Query: "b", Date: "/Date(1326156400000-0700)/", Impressions: 1 },
-    ] }));
-    const r = await callTool(envWithToken(), "bing_search_performance", { siteUrl: "https://example.com/", startDate: "2012-01-01", endDate: "2012-12-31" });
-    expect(r.json.result.structuredContent.rows.map((x: any) => x.query)).toEqual(["b"]);
-  });
-
-  it("page dimension labels rows by page", async () => {
-    mockFetch(() => json({ d: [{ Query: "https://example.com/a", Impressions: 1 }] }));
-    const r = await callTool(envWithToken(), "bing_search_performance", { siteUrl: "https://example.com/", dimension: "page" });
-    expect(r.json.result.structuredContent.rows[0].page).toBe("https://example.com/a");
-  });
-
-  it("bing_url_info succeeds and rejects cross-domain without calling upstream", async () => {
-    const f = mockFetch(() => json({ d: { Url: "https://example.com/a", HttpStatus: 200, IsPage: true } }));
-    const okRes = await callTool(envWithToken(), "bing_url_info", { siteUrl: "https://example.com", url: "https://example.com/a" });
-    expect(okRes.json.result.structuredContent.info.httpStatus).toBe(200);
-    f.mockClear();
-    const bad = await callTool(envWithToken(), "bing_url_info", { siteUrl: "https://example.com", url: "https://other-domain.com/foo" });
-    expect(bad.json.result.isError).toBe(true);
-    expect(f).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [{ siteUrl: "nope" }],
-    [{ siteUrl: "ftp://example.com/" }],
-    [{ siteUrl: "https://example.com/", limit: 0 }],
-    [{ siteUrl: "https://example.com/", limit: -5 }],
-    [{ siteUrl: "https://example.com/", limit: 100000 }],
-    [{ siteUrl: "https://example.com/", startDate: "2024-13-99x" }],
-    [{ siteUrl: "https://example.com/", startDate: "2026-02-30" }],
-    [{ siteUrl: "https://example.com/", endDate: "2026-13-01" }],
-    [{ siteUrl: "https://example.com/", startDate: "2026-00-10" }],
-    [{ siteUrl: "https://example.com/", startDate: "2024-02-01", endDate: "2024-01-01" }],
-  ])("rejects invalid search args %j without upstream call", async (args) => {
-    const f = mockFetch(() => json({ d: [] }));
-    const r = await callTool(envWithToken(), "bing_search_performance", args);
-    const failed = r.json.error !== undefined || r.json.result?.isError === true;
-    expect(failed).toBe(true);
-    expect(f).not.toHaveBeenCalled();
-  });
-
-  it("accepts leap day 2024-02-29", async () => {
-    mockFetch(() => json({ d: [] }));
-    const r = await callTool(envWithToken(), "bing_search_performance", { siteUrl: "https://example.com/", startDate: "2024-02-29", endDate: "2024-02-29" });
-    expect(r.json.result.isError).not.toBe(true);
-  });
-
-  it("url_info with userinfo -> validation, no upstream call", async () => {
-    const f = mockFetch(() => json({ d: {} }));
-    const r = await callTool(envWithToken(), "bing_url_info", { siteUrl: "https://example.com/", url: "https://user:pass@example.com/a" });
+  it("returns data_unavailable when nothing was ingested yet", async () => {
+    const r = await call("bing_list_sites", {});
     expect(r.json.result.isError).toBe(true);
-    expect(r.text).toContain("validation");
-    expect(f).not.toHaveBeenCalled();
+    expect(JSON.parse(r.json.result.content[0].text).error.code).toBe("data_unavailable");
+  });
+});
+
+describe("bing_search_performance", () => {
+  const stat = { dimension_value: "firstsun", stat_date: "2026-09-17", impressions: "10", clicks: null, avg_click_position: null, avg_impression_position: 4 };
+  const serve = (text: string) => (text.includes("bing_latest_search_runs") ? [{ fetch_run_id: "1", fetched_at: new Date("2026-09-20T18:30:00Z"), data_through: "2026-09-17" }] : [stat]);
+
+  it("keys rows by the requested dimension and includes freshness", async () => {
+    db.handler = serve;
+    const out = (await call("bing_search_performance", { siteUrl: SITE, dimension: "page" })).json.result.structuredContent;
+    expect(out.rows[0]).toEqual({ page: "firstsun", date: "2026-09-17", impressions: 10, clicks: null, avgClickPosition: null, avgImpressionPosition: 4 });
+    expect(out.freshness).toMatchObject({ fetchedAt: "2026-09-20T18:30:00.000Z", dataThrough: "2026-09-17" });
+    expect(["boolean", "string"]).toContain(typeof out.freshness.stale);
+    expect(out).toMatchObject({ siteUrl: SITE, dimension: "page", rowCount: 1, offset: 0, truncated: false });
   });
 
-  it("missing binding -> safe missing_configuration error", async () => {
-    const r = await callTool({}, "bing_list_sites", {});
-    expect(r.json.result.isError).toBe(true);
-    expect(r.text).toContain("missing_configuration");
-  });
-  it("empty token -> missing_configuration", async () => {
-    const r = await callTool(envWithToken(""), "bing_list_sites", {});
-    expect(r.text).toContain("missing_configuration");
+  it("applies default limit/offset and dimension", async () => {
+    let values: unknown[] = [];
+    db.handler = (text, v) => {
+      if (!text.includes("bing_latest_search_runs")) values = v;
+      return serve(text);
+    };
+    await call("bing_search_performance", { siteUrl: SITE });
+    expect(values).toEqual([SITE, "query", null, null, 26, 0]);
   });
 
-  it("provider auth failure: safe error, token never in MCP result", async () => {
-    mockFetch(() => json({ ErrorCode: 3, Message: `InvalidApiKey ${TOKEN}` }, 400));
-    const r = await callTool(envWithToken(), "bing_list_sites", {});
+  it("rejects out-of-range limits and bad dates at the schema boundary without querying", async () => {
+    for (const args of [{ limit: 201 }, { limit: 0 }, { offset: -1 }, { startDate: "2026-13-01" }]) {
+      const r = await call("bing_search_performance", { siteUrl: SITE, ...args });
+      expect(r.json.error ?? r.json.result?.isError).toBeTruthy();
+    }
+    expect(db.statements).toEqual([]);
+  });
+
+  it("returns data_unavailable when the site has no successful ingestion", async () => {
+    const r = await call("bing_search_performance", { siteUrl: SITE });
+    expect(JSON.parse(r.json.result.content[0].text).error.code).toBe("data_unavailable");
+  });
+
+  it("returns a safe database_unavailable error without leaking connection details", async () => {
+    db.connectError = new Error("connect ECONNREFUSED postgres://reader:hunter2@10.1.2.3:5432/windmill_pipeline");
+    const r = await call("bing_search_performance", { siteUrl: SITE });
     expect(r.json.result.isError).toBe(true);
-    expect(r.text).toContain("authentication");
-    expect(r.text).not.toContain(TOKEN);
-    expect(r.text).not.toContain("InvalidApiKey");
+    expect(JSON.parse(r.json.result.content[0].text).error.code).toBe("database_unavailable");
+    expect(r.text).not.toMatch(/hunter2|10\.1\.2\.3|reader|windmill_pipeline/);
   });
-  it("429 and 5xx map to distinct safe codes", async () => {
-    mockFetch(() => json({}, 429));
-    expect((await callTool(envWithToken(), "bing_list_sites", {})).text).toContain("rate_limited");
-    mockFetch(() => json({ raw: "internal stack" }, 502));
-    const r = await callTool(envWithToken(), "bing_list_sites", {});
-    expect(r.text).toContain("upstream");
-    expect(r.text).not.toContain("internal stack");
-  });
-  it("network failure with token in error text does not leak", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError(`failed apikey=${TOKEN}`); }));
-    const r = await callTool(envWithToken(), "bing_list_sites", {});
-    expect(r.text).toContain("network");
-    expect(r.text).not.toContain(TOKEN);
+
+  it("reports missing_configuration when the Hyperdrive binding is absent", async () => {
+    const r = await call("bing_list_sites", {}, {});
+    expect(JSON.parse(r.json.result.content[0].text).error.code).toBe("missing_configuration");
   });
 });

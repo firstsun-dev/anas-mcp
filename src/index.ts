@@ -2,8 +2,8 @@ import { createMcpHandler } from "agents/mcp/server";
 import { createServer } from "./server";
 
 export interface Env {
-  /** Cloudflare Secrets Store binding holding the Bing Webmaster API key. */
-  BING_WEBMASTER_TOKEN?: SecretsStoreSecret;
+  /** Read-only Hyperdrive binding to the windmill_pipeline PostgreSQL database (schema blog_analytics). */
+  ANALYTICS_DB?: Hyperdrive;
 }
 
 export default {
