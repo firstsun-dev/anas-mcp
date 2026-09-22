@@ -6,5 +6,15 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
-  }
+  },
+  // Read-only PostgreSQL access (Windmill-ingested blog_analytics data). The database credential is owned by
+  // the Hyperdrive configuration and must never be copied into this file or Secrets Store.
+  // The id below is a placeholder: the operator must replace it with the real Hyperdrive config id before deploy.
+  // Local dev: set WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_ANALYTICS_DB to a local Postgres URL.
+  "hyperdrive": [
+    {
+      "binding": "ANALYTICS_DB",
+      "id": "00000000000000000000000000000000"
+    }
+  ]
 }

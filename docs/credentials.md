@@ -9,7 +9,6 @@ Any long-lived secret that is consumed directly by the `anas-mcp` Worker MUST be
 Examples include:
 
 - Google OAuth credential JSON
-- Bing Webmaster provider token/API key
 - OAuth client secrets owned by `anas-mcp`
 - API tokens used directly by `anas-mcp`
 - application signing/encryption secrets owned by `anas-mcp`
@@ -30,6 +29,13 @@ The PostgreSQL role used by Hyperdrive must remain read-only for the analytics s
 ### Microsoft Clarity token
 
 `anas-mcp` does not call Microsoft Clarity directly. The Clarity API token remains owned by `firstsun-dev/windmill-flows` and MUST NOT be copied into this repository or this Worker's Secrets Store.
+
+### Bing Webmaster token/API key
+
+`anas-mcp` does not call Bing Webmaster directly. The Bing provider token/API key is owned by `firstsun-dev/windmill-flows` and MUST NOT be copied into this repository or this Worker's Secrets Store.
+
+Windmill is responsible for provider calls, throttling/retry behavior, and persistence of sanitized fetch evidence. PostgreSQL must never contain the Bing API key.
+
 
 ### Short-lived access tokens
 
@@ -58,7 +64,6 @@ Prefer names that identify application, environment, and purpose, for example:
 
 ```text
 ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS
-ANAS_PROD_BING_WEBMASTER_TOKEN
 ANAS_STAGING_GOOGLE_OAUTH_CREDENTIALS
 ANAS_PROD_MCP_OAUTH_CLIENT_SECRET
 ```
@@ -77,13 +82,6 @@ For structured credentials such as Google OAuth JSON:
 4. Exchange long-lived credential material for a short-lived provider token.
 5. Keep the short-lived token only in runtime memory.
 6. Redact all credential material from errors and telemetry.
-
-For opaque provider tokens such as Bing Webmaster:
-
-1. Retrieve the bound token from Secrets Store at runtime.
-2. Validate that the value is present and non-empty without logging it.
-3. Attach it only to the verified Bing Webmaster upstream request.
-4. Do not copy it into application storage, CI variables, logs, telemetry, or MCP responses.
 
 ## Review checklist
 

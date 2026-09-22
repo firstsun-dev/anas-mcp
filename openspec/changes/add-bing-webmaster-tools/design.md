@@ -1,104 +1,262 @@
-# Design: Bing Webmaster Tools provider
+# Design: Bing Webmaster ingestion and PostgreSQL read model
 
 ## Runtime model
-Bing Webmaster Tools is queried directly by `anas-mcp` at MCP request time. It does not flow through Windmill or PostgreSQL.
+Bing Webmaster Tools is **not** queried by `anas-mcp` at MCP request time.
+
+The architecture is:
 
 ```text
-ChatGPT / MCP client
+Scheduled Windmill job
         |
+        | Bing Webmaster API key
         v
-Cloudflare Access
+Bing Webmaster REST/JSON API
         |
+        | raw/fetch-run evidence + normalized rows
         v
+PostgreSQL (blog_analytics)
+        ^
+        |
+Cloudflare Hyperdrive
+        ^
+        |
 anas-mcp
+        ^
         |
-        +--> Bing Webmaster REST/JSON API
+ChatGPT / MCP client
 ```
 
-The exact upstream REST/JSON operation URLs must be verified against Microsoft documentation during implementation. Do not copy examples that depend on retired SOAP/POX protocols.
+This separates provider ingestion from query serving. Bing throttling, retries, provider latency, and upstream outages are ingestion concerns; normal MCP reads use the latest successfully persisted data.
 
-## Module boundaries
+A live Cloudflare Worker attempt on 2026-09-21 reached Bing but received HTTP 400 with:
 
-```text
-src/
-├── tools/
-│   └── bing-webmaster.ts
-└── services/
-    └── bing-webmaster.ts
+```json
+{"ErrorCode":17,"Message":"ERROR!!! ThrottleIP"}
 ```
 
-- `tools/bing-webmaster.ts`: Zod/MCP schemas, validation, bounded output shaping.
-- `services/bing-webmaster.ts`: Secrets Store token loading, upstream REST/JSON requests, and provider error normalization.
+That observation is architectural evidence for moving Bing provider calls away from Cloudflare Worker request paths.
 
-## Authentication
-Use a long-lived Bing Webmaster provider token/API key for the initial Firstsun server-side integration.
+## Ownership boundaries
 
-The production source of truth is a Cloudflare Secrets Store secret bound to the Worker, for example:
+### `firstsun-dev/windmill-flows`
+Owns:
+- Bing Webmaster API key/token.
+- Bing REST/JSON requests.
+- rate-limit handling, including `ThrottleIP`.
+- retry/backoff policy.
+- scheduled ingestion.
+- raw/fetch-run evidence.
+- normalization and PostgreSQL writes.
+- schema migrations required for the Bing read model.
 
-```text
-BING_WEBMASTER_TOKEN
-```
+### `firstsun-dev/anas-mcp`
+Owns:
+- read-only Hyperdrive access.
+- constrained SQL/query repository logic.
+- MCP input validation.
+- bounded response shaping.
+- freshness metadata returned to clients.
 
-Treat the value as opaque credential material. The Worker retrieves it only at runtime and attaches it only to Bing Webmaster upstream requests using the authentication mechanism required by the verified REST/JSON endpoint.
+`anas-mcp` SHALL NOT own or bind the Bing Webmaster provider credential.
+
+## Ingestion cadence
+Bing search-performance data does not require per-request refresh.
+
+Default behavior:
+- run no more frequently than daily unless provider behavior demonstrates a need for a different cadence;
+- one scheduled job may cover all enabled/authorized sites;
+- failed/throttled runs must be observable and must not overwrite the last successful normalized dataset as though it were fresh.
+
+The exact schedule is an operational Windmill setting and does not change the MCP contract.
+
+## Provider contract
+Windmill should use the Microsoft-supported REST/JSON interface current at implementation time.
+
+Initial read operations:
+- `GetUserSites`
+- `GetQueryStats`
+- `GetPageStats`
+
+Legacy SOAP/POX interfaces remain prohibited.
+
+Observed live provider failure:
+- HTTP 400
+- `ErrorCode: 17`
+- `Message: ERROR!!! ThrottleIP`
+
+The ingestion layer should classify that as provider throttling/rate limiting and apply bounded retry/backoff rather than treating it as an invalid credential.
+
+## Credential ownership
+The Bing Webmaster API key belongs to the Windmill ingestion service because Windmill is the component that consumes it.
 
 Rules:
-- Do not commit or log the Bing provider token.
-- Do not copy the token into Wrangler `vars`, `.env`, `.dev.vars`, GitHub Actions, KV, D1, PostgreSQL, or source code.
-- Do not add an OAuth authorization-code/refresh-token flow for the initial Bing integration unless a future accepted OpenSpec change requires delegated user authorization.
-- Keep the MCP tool surface read-only even if the configured provider credential is technically capable of write operations.
+- do not store the Bing API key in `anas-mcp` Cloudflare Secrets Store;
+- do not bind `BING_WEBMASTER_TOKEN` to the Worker;
+- do not copy the key into PostgreSQL, logs, analytics payloads, or MCP responses;
+- store the credential using the protected Windmill/GitHub-to-Windmill credential convention already used by other ingestion pipelines;
+- rotate the Windmill-owned credential independently from `anas-mcp` deployment.
+
+Google GA4/Search Console credentials remain unrelated and continue to use `anas-mcp` Cloudflare Secrets Store because those APIs are still queried directly by the Worker.
+
+## PostgreSQL model
+Follow the existing `blog_analytics` ingestion pattern used by Clarity: preserve provider-fetch evidence and derive normalized query-serving rows.
+
+The exact migration belongs in `firstsun-dev/windmill-flows`, but the logical contract should provide equivalent concepts to:
+
+### Fetch runs
+A source-of-truth/fetch-run table, logically similar to:
+
+```text
+blog_analytics.bing_fetch_runs
+```
+
+Useful fields include:
+- fetch run id
+- site URL / operation
+- scheduled/fetched timestamps
+- status
+- HTTP status
+- provider error code/class
+- safe error message
+- row count
+- payload hash
+- raw payload or an equivalent immutable raw-storage reference
+- normalizer version where applicable
+
+Raw payload storage must never contain the API key.
+
+### Site read model
+A normalized site read model, logically similar to:
+
+```text
+blog_analytics.bing_sites
+```
+
+It should expose only safe fields required by MCP, such as:
+- site URL
+- verified status when available
+- source fetch id
+- fetched timestamp
+
+Verification/authentication codes from Bing must not be exposed.
+
+### Search-performance read model
+A normalized table, logically similar to:
+
+```text
+blog_analytics.bing_search_stats
+```
+
+Logical fields:
+- source fetch id
+- site URL
+- dimension: `query | page`
+- key: query text or page URL
+- provider stat date
+- impressions
+- clicks
+- average click position
+- average impression position
+- fetched timestamp
+
+A view or constrained query SHOULD make it straightforward for `anas-mcp` to select only rows belonging to the latest successful dataset for a site/dimension.
+
+## Implemented schema contract
+Migration `20260921030000_blog_analytics_bing.sql` in `firstsun-dev/windmill-flows` (database `windmill_pipeline`, schema `blog_analytics`):
+
+- `bing_fetch_runs`: one immutable row per provider call (`operation` = `user_sites | query_stats | page_stats`; `status` = `pending | success | throttled | provider_error | network_error | validation_failed`; `fetched_at`, `data_through`, `row_count`, `payload_hash`, sanitized `raw_payload`, redacted `safe_error_message`). At most one `success` per site/operation/Taipei-day.
+- `bing_sites`, `bing_search_stats` (`dimension` = `query | page`, `dimension_value`, `stat_date`, nullable metrics): normalized rows keyed by `fetch_run_id`.
+- Serving views (anas-mcp reads **only** these): `bing_latest_sites`, `bing_latest_search_runs` (one row per site/dimension: `fetch_run_id`, `fetched_at`, `data_through`), `bing_latest_search_stats`. They select the latest **successful** run, so a newer throttled/failed run never replaces or hides a previous good dataset, and `fetchedAt`/`dataThrough` always describe the dataset actually served.
+- The Hyperdrive role needs `USAGE` on schema `blog_analytics` and `SELECT` on those three views only (no base-table access).
+
+Staleness: `stale = true` when the served run was fetched more than 72h ago (`STALE_AFTER_HOURS`); `"unknown"` when `fetchedAt` is unavailable.
+
+## Freshness contract
+Because Bing data is ingested asynchronously, MCP responses must expose freshness.
+
+At minimum `bing_search_performance` should return metadata equivalent to:
+
+```ts
+{
+  fetchedAt: string | null;
+  dataThrough: string | null;
+  stale: boolean | "unknown";
+}
+```
+
+Semantics:
+- `fetchedAt`: timestamp of the latest successful ingestion represented by the result.
+- `dataThrough`: newest provider stat date in the returned/current dataset when known.
+- `stale`: based on a documented service threshold, or `"unknown"` when freshness cannot be established safely.
+
+Do not interpret missing/newer dates as zero traffic.
 
 ## Initial MCP tools
 
 ### `bing_list_sites`
-Return the Bing Webmaster sites visible to the configured credential.
+Reads the normalized site read model through Hyperdrive.
 
 Constraints:
 - read-only
 - bounded result count
-- do not expose verification secrets/codes if the provider response contains them
+- no verification/authentication codes
+- include latest ingestion timestamp when useful
 
 ### `bing_search_performance`
-Expose the search-performance data needed for SEO analysis, including query/page-oriented traffic statistics available from the supported Bing API.
+Reads normalized query/page statistics through Hyperdrive.
+
+Inputs may include:
+- `siteUrl`
+- `dimension: query | page`
+- `startDate`
+- `endDate`
+- bounded `limit`
+- bounded `offset`
 
 Constraints:
-- require an authorized site URL
-- bound rows and any provider-supported date/filter dimensions
-- normalize impressions, clicks, and position-like fields without inventing unavailable metrics
-- do not promise parity with Google Search Console where Bing semantics differ
+- validate inputs before SQL execution
+- use parameterized predefined query paths
+- return bounded rows
+- preserve separate Bing click/impression position semantics
+- return freshness metadata
+- never accept arbitrary SQL
 
 ### `bing_url_info`
-Return provider-supported index/crawl information for a URL belonging to an authorized site.
+Deferred from the initial implementation.
 
-Constraints:
-- validate URL/site relationship
-- read only
-- return a stable normalized subset rather than raw provider payloads
+Reason:
+- `GetUrlInfo` is naturally an arbitrary URL lookup rather than a bulk analytics feed;
+- proxying it directly from `anas-mcp` recreates Cloudflare egress/IP-throttle risk;
+- pre-fetching every site URL would create unnecessary provider traffic.
 
-## Write operations
-The initial provider intentionally excludes URL submission, Sitemap mutation, site configuration changes, and every other write-capable operation.
+A future accepted OpenSpec change may add URL information using a bounded cache, curated URL ingestion, or an on-demand Windmill workflow with explicit rate-limit/caching behavior.
 
-Adding a Bing write tool requires a new accepted OpenSpec change covering:
-- why write access is necessary
-- what additional upstream credential capability is required
-- authorization and audit controls
-- tool confirmation/guardrails
-- blast radius and rollback behavior
-
-## Protocol compatibility
-Microsoft documents retirement of the legacy SOAP and POX Bing Webmaster APIs as of 2026-08-31. The implementation must use the Microsoft-supported REST/JSON interface current at implementation time.
-
-Do not build new code against:
-- SOAP endpoints
-- POX endpoints
-- legacy SDK assumptions that require those protocols
-
-Because Microsoft documentation contains historical samples, implementation work must verify the current REST/JSON endpoint and payload contract rather than blindly copying an old sample.
-
-## Error handling
-- Validate site URLs and tool limits before upstream calls.
-- Normalize authorization, quota, validation, and upstream failures.
-- Never include the Bing provider token or raw authorization material in errors.
-- Do not return raw provider payloads by default.
+## Failure behavior
+- A failed Windmill fetch must be recorded as a failed/throttled run.
+- Failed ingestion must not delete or silently replace the last successful read model.
+- MCP reads should continue serving the latest successful data when available.
+- MCP should surface freshness/staleness metadata rather than the upstream Bing error for historical stored reads.
+- If no successful dataset exists, the MCP tool should return a safe data-unavailable error.
+- Database failures should be normalized separately from provider-ingestion freshness.
 
 ## Observability
-Log only safe operation metadata such as tool name, upstream latency, status class, and bounded result counts. Do not log query rows, URL-level payloads, or credential material by default.
+Windmill may log only safe operational metadata:
+- operation
+- site identifier if policy allows
+- latency
+- HTTP status class
+- provider error code/class
+- result count
+- retry count
+
+Do not log the API key or raw request URL containing `apikey`.
+
+`anas-mcp` should log only safe database/query operation metadata and bounded result counts, not row payloads by default.
+
+## Write operations
+The integration remains read-only end to end from the MCP perspective.
+
+Adding URL submission, Sitemap mutation, site configuration changes, or another Bing write operation requires a separate accepted OpenSpec change.
+
+## OpenAPI impact
+This architecture changes only backend data sourcing for MCP tools. It adds no HTTP route or method, so `openapi.yaml` does not require a route-level change.

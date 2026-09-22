@@ -1,7 +1,10 @@
 import { createMcpHandler } from "agents/mcp/server";
 import { createServer } from "./server";
 
-export interface Env {}
+export interface Env {
+  /** Read-only Hyperdrive binding to the windmill_pipeline PostgreSQL database (schema blog_analytics). */
+  ANALYTICS_DB?: Hyperdrive;
+}
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext) {
@@ -11,7 +14,7 @@ export default {
       return Response.json({ service: "anas-mcp", status: "ok" });
     }
 
-    return createMcpHandler(() => createServer(), { route: "/mcp" })(
+    return createMcpHandler(() => createServer(env), { route: "/mcp" })(
       request,
       env,
       ctx,
