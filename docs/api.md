@@ -50,19 +50,15 @@ If served by this Worker in a future change, prefer routes such as:
 
 or equivalent static/generated documentation paths.
 
-Do not expose credentials, Access assertions, provider tokens, Hyperdrive connection details, or analytics payload examples containing private production data in Swagger/OpenAPI documentation.
+Do not expose credentials, bearer API keys, provider tokens, Hyperdrive connection details, or analytics payload examples containing private production data in Swagger/OpenAPI documentation.
 
 Whether `/docs` is public or Access-protected must be an explicit decision. A public schema is acceptable only if it contains no sensitive operational information.
 
-## Cloudflare Access representation
+## Bearer API-key representation
 
-Production `/mcp` is protected by Cloudflare Access Managed OAuth.
+Production `/mcp` requires `Authorization: Bearer <ANAS_MCP_API_KEY>`, a dedicated service-level key validated by the Worker against Cloudflare Secrets Store. `openapi.yaml` models this as the HTTP bearer security scheme `McpApiKeyBearer`.
 
-The OpenAPI description represents the resulting HTTP authorization requirement as a bearer security scheme because the Worker receives an authenticated bearer credential after the Access OAuth flow.
-
-This does not mean users manually paste a static bearer token. ChatGPT and other standards-compliant MCP clients should obtain the token through Cloudflare Access Managed OAuth.
-
-OAuth discovery/authorization metadata remains owned by Cloudflare Access rather than duplicated into `openapi.yaml` with guessed production endpoints.
+The contract documents `401` (missing/invalid credential, with `WWW-Authenticate: Bearer`). There is no per-user authorization, so no identity-based `403` is documented. No OAuth endpoints exist, and no example credential is embedded. See `docs/mcp-authentication.md`.
 
 ## MCP transport
 

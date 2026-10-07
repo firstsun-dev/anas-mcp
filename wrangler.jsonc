@@ -15,5 +15,14 @@
       "binding": "ANALYTICS_DB",
       "id": "8677c23af5c14b43a460169f2f2cc93f"
     }
+  ],
+  // Dedicated anas-mcp bearer API key (Secrets Store; async binding). The secret value is provisioned by an
+  // operator and never committed. See docs/credentials.md. Store id is an identifier, not a credential.
+  "secrets_store_secrets": [
+    {
+      "binding": "ANAS_MCP_API_KEY",
+      "store_id": "a2a4a60a04b142d3a0c7d482542e67fc",
+      "secret_name": "ANAS_PROD_MCP_API_KEY"
+    }
   ]
 }

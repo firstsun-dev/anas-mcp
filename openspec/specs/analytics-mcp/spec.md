@@ -21,7 +21,7 @@ The service SHALL maintain a repository-root `openapi.yaml` using OpenAPI 3.2.0 
 #### Scenario: Developer inspects the HTTP API
 - WHEN a developer opens `openapi.yaml` in Swagger-compatible tooling supporting OpenAPI 3.2.0
 - THEN the currently supported HTTP surface can be inspected without requiring source-code inspection
-- AND the document SHALL NOT contain production credentials, Access assertions, provider tokens, database secrets, or private analytics payloads
+- AND the document SHALL NOT contain production credentials, bearer API keys, provider tokens, database secrets, or private analytics payloads
 
 ### Requirement: MCP/OpenAPI contract separation
 OpenAPI SHALL describe the MCP HTTP transport but SHALL NOT replace the authoritative MCP tool schemas.
@@ -106,7 +106,7 @@ Production and development Worker deployment SHALL use the reusable Cloudflare W
 #### Scenario: CI authenticates to Cloudflare
 - WHEN the reusable workflow requires Cloudflare deployment credentials before Worker runtime bindings are available
 - THEN the required least-privilege deployment credential MAY use the protected GitHub Actions secret/configuration mechanism expected by the shared workflow
-- AND runtime credentials such as Google OAuth JSON, Bing Webmaster tokens, Clarity tokens, PostgreSQL passwords, or Access token material SHALL NOT be copied into CI solely for deployment
+- AND runtime credentials such as Google OAuth JSON, Bing Webmaster tokens, Clarity tokens, PostgreSQL passwords, or the MCP API key SHALL NOT be copied into CI solely for deployment
 
 #### Scenario: Caller workflow is enabled
 - GIVEN this repository currently uses npm scripts and the shared workflow currently invokes `pnpm exec wrangler` internally
@@ -243,10 +243,10 @@ Credentials owned by platform integrations or other services SHALL remain with t
 - AND MCP tools SHALL read the resulting PostgreSQL read model through Hyperdrive
 
 
-#### Scenario: Cloudflare Access authenticates MCP clients
-- WHEN Cloudflare Access Managed OAuth is used for `/mcp`
-- THEN Access-owned OAuth client/session/token material remains managed by Cloudflare Access
-- AND `anas-mcp` SHALL NOT duplicate that platform-managed material into Secrets Store or an application datastore
+#### Scenario: MCP clients authenticate
+- WHEN a client authenticates to `/mcp` with the dedicated bearer API key
+- THEN the key is read from the Cloudflare Secrets Store binding and compared in the Worker
+- AND the key and the supplied `Authorization` header SHALL NOT be persisted, logged, or returned
 
 #### Scenario: Worker accesses PostgreSQL
 - WHEN the Worker accesses PostgreSQL through Hyperdrive
@@ -274,7 +274,7 @@ Analytics tools SHALL enforce bounded request and response sizes.
 - THEN the service clamps or rejects the request with a clear validation error
 
 ### Requirement: Minimal health endpoint
-`/health` MAY remain unauthenticated when Cloudflare Access protection is scoped specifically to `/mcp`, but it SHALL expose no sensitive state.
+`/health` MAY remain unauthenticated while `/mcp` requires bearer authentication, but it SHALL expose no sensitive state.
 
 #### Scenario: Health check is requested
 - WHEN a caller requests `/health`

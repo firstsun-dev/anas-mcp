@@ -128,7 +128,7 @@ CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
 
-Use least privilege. Do not copy runtime Google OAuth credentials, Access tokens, Clarity tokens, or PostgreSQL passwords into GitHub Actions secrets solely for deployment.
+Use least privilege. Do not copy runtime Google OAuth credentials, the MCP API key, Clarity tokens, or PostgreSQL passwords into GitHub Actions secrets solely for deployment.
 
 ## Branch behavior
 
@@ -146,15 +146,13 @@ Re-check the current `firstsun-dev/.github` workflow before changing caller assu
 
 Deployment success alone does not prove MCP authentication works.
 
-When production Access is provisioned, post-deploy verification should cover at minimum:
+When the production MCP API key is provisioned, post-deploy verification should cover at minimum:
 
-- `/health` returns only minimal readiness according to the selected Access path scope
-- unauthenticated `/mcp` cannot invoke MCP tools
-- Cloudflare Access Managed OAuth discovery/login is reachable
-- an allowed identity can initialize MCP
-- a denied identity remains blocked
+- `/health` returns only minimal readiness without credentials
+- `/mcp` without `Authorization`, or with an invalid bearer value, returns `401` and cannot invoke MCP tools
+- the valid dedicated API key can initialize MCP and list tools (the key must come from an operator-held secret, never from CI logs or committed files)
 
-Do not put reusable Access-auth test implementation into the caller workflow if it can be generalized in `firstsun-dev/.github`.
+Do not put reusable auth test implementation into the caller workflow if it can be generalized in `firstsun-dev/.github`.
 
 ## Change policy
 

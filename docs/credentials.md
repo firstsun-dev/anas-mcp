@@ -11,6 +11,7 @@ Examples include:
 - Google OAuth credential JSON
 - OAuth client secrets owned by `anas-mcp`
 - API tokens used directly by `anas-mcp`
+- the dedicated MCP bearer API key (`ANAS_MCP_API_KEY`)
 - application signing/encryption secrets owned by `anas-mcp`
 - future provider credentials consumed by this Worker
 
@@ -65,7 +66,8 @@ Prefer names that identify application, environment, and purpose, for example:
 ```text
 ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS
 ANAS_STAGING_GOOGLE_OAUTH_CREDENTIALS
-ANAS_PROD_MCP_OAUTH_CLIENT_SECRET
+ANAS_PROD_MCP_API_KEY
+ANAS_STAGING_MCP_API_KEY
 ```
 
 Development, staging, and production credentials MUST be separate and independently rotatable.
@@ -93,3 +95,20 @@ Before introducing any credential, answer:
 4. If no, which platform owns it and why?
 5. Is the value accidentally duplicated in GitHub Actions, Wrangler config, `.env`, Hyperdrive, or another store?
 6. Is rotation possible without a source-code change?
+
+## MCP API key (`ANAS_MCP_API_KEY`)
+
+The dedicated bearer credential for `/mcp` is an application-owned Secrets Store credential. It authenticates MCP clients to `anas-mcp` and nothing else.
+
+| Item | Value |
+| --- | --- |
+| Secrets Store secret (production) | `ANAS_PROD_MCP_API_KEY` |
+| Secrets Store secret (staging, when it exists) | `ANAS_STAGING_MCP_API_KEY` |
+| Worker binding | `ANAS_MCP_API_KEY` (configured in `wrangler.jsonc` `secrets_store_secrets`) |
+
+Rules:
+
+- Generate it with a CSPRNG outside source control (see `docs/mcp-authentication.md`); never use a memorable string.
+- Staging and production use independent keys, rotated independently.
+- These are **not** valid substitutes: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `BING_WEBMASTER_API_KEY`, Google OAuth client secret/refresh token, PostgreSQL/Hyperdrive credentials, Clarity API token, GitHub Actions deployment token.
+- The binding is asynchronous (`await env.ANAS_MCP_API_KEY.get()`); the value must never be logged or returned.

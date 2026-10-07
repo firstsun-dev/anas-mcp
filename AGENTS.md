@@ -7,9 +7,9 @@
 - Expose MCP over stateless Streamable HTTP at `/mcp` using `createMcpHandler()`.
 - **HTTP API contract uses OpenAPI 3.2.0.** Keep repository-root `openapi.yaml` synchronized with every HTTP route/method/auth/status/content-type/stable-payload change. Swagger-compatible tooling is the expected rendering ecosystem. See `docs/api.md` and `openspec/changes/adopt-openapi-http-contract/`.
 - Do not model MCP tools as fake REST endpoints merely to expose them in Swagger. MCP tool schemas remain authoritative in MCP/Zod; OpenAPI documents the HTTP transport surface.
-- **Production MCP authentication uses Cloudflare Access Managed OAuth.** The production `/mcp` resource must be protected by an Access self-hosted application with Managed OAuth enabled and default-deny Access policy. See `docs/cloudflare-access.md` and `openspec/changes/add-cloudflare-access-auth/`.
-- Do not replace Access Managed OAuth with shared static bearer tokens, query-string secrets, OpenAI IP allowlisting, User-Agent checks, or a custom username/password system.
-- Do not add `@cloudflare/workers-oauth-provider`, `OAUTH_KV`, D1, Durable Objects, or PostgreSQL OAuth tables solely to duplicate Cloudflare Access Managed OAuth unless an accepted OpenSpec change supersedes the current decision.
+- **Production MCP authentication uses a dedicated bearer API key.** `/mcp` requires `Authorization: Bearer <ANAS_MCP_API_KEY>`, validated in the Worker (`src/auth/mcp-api-key.ts`) before MCP initialization, `createServer()`, or any tool/database access. The key lives in Cloudflare Secrets Store (binding `ANAS_MCP_API_KEY`). See `docs/mcp-authentication.md` and `openspec/changes/use-mcp-api-key-auth/`. `add-cloudflare-access-auth` is superseded historical rationale only.
+- The MCP API key is a dedicated `anas-mcp` credential. Never substitute `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, Bing/Google/Clarity credentials, PostgreSQL/Hyperdrive credentials, or CI deployment tokens. Never log the `Authorization` header or key material.
+- Do not accept the MCP credential via query string, replace it with OpenAI IP allowlisting or User-Agent checks, or add `@cloudflare/workers-oauth-provider`, `OAUTH_KV`, D1, Durable Objects, or PostgreSQL auth tables unless an accepted OpenSpec change supersedes the current decision.
 - **Cloudflare Worker CI/CD is centralized in `firstsun-dev/.github`.** Production/development deploy logic must use the reusable workflow `firstsun-dev/.github/.github/workflows/_cf-worker-template.yml`; this repository may contain only a thin caller workflow with app-specific triggers and inputs. See `docs/cicd.md` and `openspec/changes/use-centralized-cf-worker-ci/`.
 - Do not copy/fork `wrangler versions upload/deploy`, shared rollback logic, or generic Cloudflare pipeline steps into this repository to bypass the central workflow. Generic CI improvements belong in `firstsun-dev/.github`.
 - GA4 is queried through the Google Analytics Data API.
@@ -25,7 +25,6 @@
 - GA4 and Google Search Console provider credentials are stored in Cloudflare Secrets Store as the shared Google OAuth credential JSON. Never commit or log credential contents.
 - Bing Webmaster provider credentials remain owned by `firstsun-dev/windmill-flows` and must not be copied into this service or its Cloudflare Secrets Store.
 - Derived short-lived Google access tokens are runtime-only and must not be persisted.
-- Cloudflare Access Managed OAuth token/session state is platform-managed and must not be duplicated into application storage.
 - PostgreSQL access must be read-only and use Cloudflare Hyperdrive when enabled. Database credentials are owned by Hyperdrive and must not be duplicated into Secrets Store.
 - The Bing Webmaster and Clarity upstream credentials remain owned by `firstsun-dev/windmill-flows` and must not be copied into this service.
 - CI bootstrap credentials required to deploy to Cloudflare may live in the protected GitHub Actions mechanism expected by the centralized workflow; do not copy runtime provider credentials into CI solely for deployment.
@@ -33,7 +32,7 @@
 - Do not add D1, Durable Objects, Containers, Queues, or other infrastructure unless an accepted OpenSpec change requires them.
 
 ## OpenSpec workflow
-1. Read `openspec/project.md`, `docs/credentials.md`, `docs/cloudflare-access.md`, `docs/cicd.md`, `docs/api.md`, `openapi.yaml`, and relevant files in `openspec/specs/`.
+1. Read `openspec/project.md`, `docs/credentials.md`, `docs/mcp-authentication.md`, `docs/cicd.md`, `docs/api.md`, `openapi.yaml`, and relevant files in `openspec/specs/`.
 2. For behavior or architecture changes, create or update a change under `openspec/changes/<change-id>/` before implementation.
 3. Keep `proposal.md`, `design.md`, and `tasks.md` aligned with implementation.
 4. Mark tasks complete only with verification evidence.
@@ -48,7 +47,7 @@ npm run check
 
 For HTTP surface changes, also validate `openapi.yaml` with the project-selected OpenAPI 3.2-capable validator and ensure Swagger-compatible rendering remains valid. Do not claim OpenAPI validation complete until that validator is actually wired into the project check/CI path.
 
-For MCP behavior changes also run the Worker locally and validate `/mcp` using MCP Inspector. Production authentication is not verified until the deployed Access Managed OAuth flow has been tested with an allowed and denied identity; ChatGPT compatibility must not be claimed unless actually tested from ChatGPT.
+For MCP behavior changes also run the Worker locally and validate `/mcp` using MCP Inspector. Production authentication is not verified until the deployed Worker has been tested with missing, invalid, and valid bearer credentials against the real Secrets Store binding; ChatGPT compatibility must not be claimed unless actually tested from ChatGPT.
 
 CI/CD work is not complete until the thin caller has been validated against the current `firstsun-dev/.github` reusable workflow contract. Do not claim deploy compatibility until package-manager behavior, required inputs, and target environment URLs have actually been verified.
 
@@ -56,8 +55,8 @@ CI/CD work is not complete until the thin caller has been validated against the 
 - Scope matches an accepted OpenSpec change or an existing spec.
 - TypeScript typecheck passes.
 - HTTP surface and `openapi.yaml` are synchronized.
-- No credentials, tokens, private keys, database URLs, Access assertions, or raw analytics payloads are committed or logged.
-- Production `/mcp` remains behind Cloudflare Access Managed OAuth unless an accepted OpenSpec change supersedes it.
+- No credentials, tokens, private keys, database URLs, bearer credentials, `Authorization` headers, or raw analytics payloads are committed or logged.
+- Production `/mcp` remains behind the dedicated bearer API-key gate unless an accepted OpenSpec change supersedes it.
 - Production/development Worker deployment remains delegated to `firstsun-dev/.github` reusable CI unless an accepted OpenSpec change documents an exception.
 - Long-lived Worker-consumed credentials use Cloudflare Secrets Store unless an accepted exception is documented.
 - Tool contracts have bounded inputs and predictable output shapes.

@@ -11,10 +11,11 @@ info:
     server implementation and its MCP/Zod contracts; they are not modeled as
     fake REST endpoints here.
 
-    Production `/mcp` traffic is protected by Cloudflare Access Managed OAuth.
-    The bearer token described below is issued/managed by Cloudflare Access;
-    clients such as ChatGPT obtain it through the Access OAuth flow rather than
-    manually pasting a shared static token.
+    Production `/mcp` traffic requires a dedicated `anas-mcp` API key sent as
+    `Authorization: Bearer <key>`. The key is service-level (no per-user
+    identity) and is validated by the Worker against Cloudflare Secrets Store
+    before any MCP processing. It is unrelated to Cloudflare API tokens or any
+    provider/database credential.
 servers:
   - url: http://localhost:8787
     description: Local development
@@ -36,10 +37,9 @@ paths:
       tags: [Health]
       summary: Service readiness
       description: |
-        Returns minimal readiness only. This endpoint may remain outside the
-        Cloudflare Access policy when Access is scoped specifically to `/mcp`.
-        It must never expose credentials, provider token state, Access policy
-        details, Hyperdrive configuration, or analytics data.
+        Returns minimal readiness only and requires no authentication. It must
+        never expose credentials, authentication configuration, secret-binding
+        state, provider token state, Hyperdrive configuration, or analytics data.
       security: []
       responses:
         '200':
@@ -66,11 +66,11 @@ paths:
         enumerating MCP tools as REST operations. Use MCP initialization and
         `tools/list` to discover the active tool contract.
 
-        Production requests must pass the Cloudflare Access Managed OAuth
-        boundary. A static shared bearer token is not a supported interactive
-        authentication mechanism.
+        Requests must carry a valid dedicated API key as an HTTP bearer
+        credential. Authentication happens before MCP initialization or any
+        tool execution; failures return a generic `401`.
       security:
-        - CloudflareAccessBearer: []
+        - McpApiKeyBearer: []
       requestBody:
         required: true
         content:
@@ -97,24 +97,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
-          description: Authentication required by the Cloudflare Access boundary
-        '403':
-          description: Authenticated identity is not allowed by Cloudflare Access policy
+          description: Missing, malformed, or invalid bearer credential. The body is a generic error and never echoes credentials.
+          headers:
+            WWW-Authenticate:
+              description: Authentication challenge
+              schema:
+                type: string
+                const: Bearer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedResponse'
+              examples:
+                unauthorized:
+                  value:
+                    error: unauthorized
         '404':
           description: Route not found or request is not valid for the configured MCP route
         '405':
           description: HTTP method not supported by the configured stateless transport
 components:
   securitySchemes:
-    CloudflareAccessBearer:
+    McpApiKeyBearer:
       type: http
       scheme: bearer
-      bearerFormat: Cloudflare Access OAuth token
       description: |
-        Short-lived bearer credential managed by Cloudflare Access Managed OAuth.
-        Interactive MCP clients obtain this credential through OAuth discovery,
-        authorization code, and PKCE. This is not a manually distributed static token.
+        Dedicated `anas-mcp` API key stored in Cloudflare Secrets Store and sent
+        as `Authorization: Bearer <key>`. Service-level credential; not an OAuth
+        token and not a Cloudflare API token.
   schemas:
+    UnauthorizedResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          const: unauthorized
     HealthResponse:
       type: object
       additionalProperties: false
@@ -136,5 +155,5 @@ components:
       additionalProperties: true
     ErrorResponse:
       type: object
-      description: Safe error response that must not contain credentials, bearer tokens, Access assertions, or raw provider secrets.
+      description: Safe error response that must not contain credentials, bearer credentials, or raw provider secrets.
       additionalProperties: true

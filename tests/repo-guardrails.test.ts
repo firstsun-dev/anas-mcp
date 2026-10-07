@@ -29,9 +29,9 @@ describe("repository guardrails", () => {
     expect(service).toMatch(/READ ONLY/);
     expect(service).not.toMatch(/export\s+(async\s+)?function\s+(executeSql|rawQuery)/);
   });
-  it("wrangler.jsonc has no Bing Secrets Store binding and uses the ANALYTICS_DB Hyperdrive binding", () => {
+  it("wrangler.jsonc binds only the MCP API key from Secrets Store (no Bing binding) and uses the ANALYTICS_DB Hyperdrive binding", () => {
     const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;
-    expect(config.secrets_store_secrets).toBeUndefined();
+    expect(config.secrets_store_secrets).toEqual([expect.objectContaining({ binding: "ANAS_MCP_API_KEY" })]);
     expect(config.vars).toBeUndefined();
     expect(config.hyperdrive).toEqual([expect.objectContaining({ binding: "ANALYTICS_DB" })]);
     expect(JSON.stringify(config)).not.toMatch(/bing|apikey|postgres(ql)?:\/\//i);

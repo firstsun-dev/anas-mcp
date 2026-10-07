@@ -42,7 +42,7 @@ The HTTP surface is specified with **OpenAPI 3.2.0** in repository-root `openapi
 - OpenAPI documents `/mcp` as an MCP Streamable HTTP transport endpoint; it SHALL NOT model each MCP tool as a fake REST endpoint.
 - MCP tool input/output contracts remain authoritative in MCP SDK/Zod schemas and are discovered through the MCP protocol.
 - CI SHALL validate `openapi.yaml` with an OpenAPI 3.2-capable validator before deployment once the project validation tool is selected.
-- Swagger/OpenAPI examples SHALL NOT include production credentials, Access assertions, provider tokens, database secrets, or private analytics payloads.
+- Swagger/OpenAPI examples SHALL NOT include production credentials, bearer API keys, provider tokens, database secrets, or private analytics payloads.
 - Runtime Swagger UI serving is optional and requires an explicit decision on route and Access protection before implementation.
 
 This decision is specified in `openspec/changes/adopt-openapi-http-contract/` and `docs/api.md`.
@@ -94,11 +94,7 @@ This decision is specified in `openspec/changes/adopt-openapi-http-contract/` an
 ```text
 ChatGPT / MCP client
         |
-        | OAuth / PKCE
-        v
-Cloudflare Access (Managed OAuth + policy)
-        |
-        | authenticated request
+        | Authorization: Bearer <dedicated anas-mcp API key>
         v
 Cloudflare Worker: anas-mcp
         |
@@ -147,7 +143,7 @@ MCP tool contracts
 - No cross-source persisted warehouse yet.
 - No user-facing dashboard.
 - No custom MCP account/password database.
-- No Worker-managed OAuth token database when Cloudflare Access Managed OAuth provides the client authentication boundary.
+- No Worker-managed OAuth token database or application user database; MCP client authentication is a dedicated bearer API key.
 - No independent local Cloudflare deployment implementation that duplicates the organization reusable workflow.
 - No fake REST endpoint per MCP tool solely for Swagger documentation.
 
