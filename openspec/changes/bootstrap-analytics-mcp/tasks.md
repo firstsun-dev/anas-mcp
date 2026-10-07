@@ -48,10 +48,10 @@
 - [ ] Add tests ensuring SQL is parameterized and no arbitrary SQL input is exposed.
 
 ## Production security and deployment
-- [ ] Execute the Cloudflare Access rollout tasks in `openspec/changes/add-cloudflare-access-auth/tasks.md`.
-- [ ] Protect production `/mcp` with a Cloudflare Access self-hosted application and enable Managed OAuth.
-- [ ] Configure default-deny Access policy with explicit allowed Firstsun identities/groups.
-- [ ] Verify ChatGPT and MCP Inspector can authenticate through Access without a manually pasted shared bearer token.
+- [ ] ~~Execute the Cloudflare Access rollout tasks in `openspec/changes/add-cloudflare-access-auth/tasks.md`.~~ Superseded by `use-mcp-api-key-auth`.
+- [ ] ~~Protect production `/mcp` with a Cloudflare Access self-hosted application and enable Managed OAuth.~~ Superseded by `use-mcp-api-key-auth`.
+- [ ] ~~Configure default-deny Access policy with explicit allowed Firstsun identities/groups.~~ Superseded.
+- [ ] Verify ChatGPT and MCP Inspector can authenticate with the dedicated bearer API key (see `use-mcp-api-key-auth`).
 - [ ] Do not add `OAUTH_KV`, D1, Durable Objects, or Worker-managed OAuth token state solely for MCP authentication.
 - [ ] Execute the centralized deployment tasks in `openspec/changes/use-centralized-cf-worker-ci/tasks.md`.
 - [ ] Use a thin caller for `firstsun-dev/.github/.github/workflows/_cf-worker-template.yml`; do not duplicate Cloudflare deploy/version/revert logic in this repository.

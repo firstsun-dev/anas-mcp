@@ -7,13 +7,15 @@ Cloudflare-hosted, read-only Remote MCP service for Firstsun analytics.
 ```text
 ChatGPT / MCP client
         |
-        | OAuth + PKCE
-        v
-Cloudflare Access (Managed OAuth + policy)
-        |
-        | authenticated Streamable HTTP
+        | Authorization: Bearer <dedicated anas-mcp API key>
         v
 Cloudflare Worker: anas-mcp
+        |
+        | authenticate BEFORE MCP initialization / tool execution
+        | (key from Cloudflare Secrets Store)
+        v
+createMcpHandler() --> read-only analytics tools
+        |
         |
         +--> Google Analytics Data API
         +--> Google Search Console API
@@ -21,7 +23,7 @@ Cloudflare Worker: anas-mcp
 ```
 
 - **HTTP API contract:** repository-root `openapi.yaml` uses OpenAPI 3.2.0 and is intended for Swagger-compatible tooling. It documents the HTTP surface; MCP tools remain MCP-native schemas rather than fake REST endpoints.
-- **MCP authentication:** production `/mcp` is protected by Cloudflare Access Managed OAuth. ChatGPT should authenticate through Access; no shared static bearer token is required for the normal interactive flow.
+- **MCP authentication:** production `/mcp` requires `Authorization: Bearer <ANAS_MCP_API_KEY>`, a dedicated service-level key stored in Cloudflare Secrets Store and checked in the Worker before any MCP/tool/database work. `/health` stays public and minimal.
 - **GA4:** direct Google Analytics Data API queries.
 - **Search Console:** direct Search Console API queries.
 - **Clarity:** read normalized PostgreSQL data populated by `firstsun-dev/windmill-flows`; this service never calls the Clarity API directly.
@@ -33,7 +35,7 @@ Cloudflare Worker: anas-mcp
 See:
 
 - `openapi.yaml` and `docs/api.md` for the HTTP/OpenAPI contract
-- `docs/cloudflare-access.md` for MCP authentication and Access setup
+- `docs/mcp-authentication.md` for MCP API-key authentication, provisioning, client setup, and rotation
 - `docs/credentials.md` for credential ownership/storage policy
 - `docs/cicd.md` for centralized deployment policy and caller-workflow contract
 
@@ -58,17 +60,11 @@ Automated OpenAPI validation is tracked in `openspec/changes/adopt-openapi-http-
 
 ## Authentication policy summary
 
-Cloudflare Access Managed OAuth is the production identity boundary for `/mcp`.
+A dedicated bearer API key (`Authorization: Bearer <ANAS_MCP_API_KEY>`) is the production boundary for `/mcp`. It is service-level: it identifies no individual user and has no per-tool scopes. Failures return a generic `401` with `WWW-Authenticate: Bearer`.
 
-Do not replace it with:
+The key must be high-entropy, generated outside source control, stored only in Cloudflare Secrets Store, and used for nothing else. `CLOUDFLARE_API_TOKEN` and provider/database/CI credentials are never valid substitutes. Do not accept the key via query string, and do not rely on OpenAI IP allowlisting or User-Agent checks.
 
-- shared static bearer tokens
-- query-string secrets
-- OpenAI IP allowlisting
-- User-Agent checks
-- a custom username/password system
-
-Cloudflare Access owns the MCP client-facing OAuth state and token lifecycle. `anas-mcp` must not add KV, D1, Durable Objects, or PostgreSQL tables solely to duplicate Managed OAuth state.
+OAuth or another identity-aware mechanism requires a future accepted OpenSpec change (see `openspec/changes/use-mcp-api-key-auth/`). `anas-mcp` must not add KV, D1, Durable Objects, or PostgreSQL auth tables for MCP client authentication.
 
 ## Credential policy summary
 
@@ -86,7 +82,7 @@ Do not use `wrangler secret` when Secrets Store can serve the same production cr
 
 Intentional exceptions:
 
-- Cloudflare Access Managed OAuth token/session material remains managed by Cloudflare Access.
+- The MCP API key is application-owned and lives in Secrets Store (`ANAS_PROD_MCP_API_KEY`, bound as `ANAS_MCP_API_KEY`); it is never a reused infrastructure credential.
 - PostgreSQL credentials stay in the Hyperdrive connection.
 - The Microsoft Clarity API token stays in `firstsun-dev/windmill-flows` because this service never calls Clarity directly.
 - Derived short-lived Google OAuth access tokens stay in runtime memory only.
@@ -130,10 +126,10 @@ The repository currently contains the MCP foundation and architecture specificat
 - OpenAPI 3.2.0 HTTP contract
 - OpenSpec architecture, requirements, design, and implementation tasks
 - Secrets Store first credential policy
-- Cloudflare Access Managed OAuth production-auth decision
+- dedicated bearer API-key authentication for `/mcp` (runtime gate + tests implemented; production Secrets Store value and deployed-client verification pending operator provisioning)
 - centralized `firstsun-dev/.github` Cloudflare Worker CI/CD decision
 
-Cloudflare dashboard Access configuration, datasource integrations, deployment caller, automated OpenAPI validation, and end-to-end ChatGPT authentication are not considered verified until actually tested.
+Production Secrets Store key provisioning, datasource integrations, deployment caller, automated OpenAPI validation, and end-to-end ChatGPT authentication are not considered verified until actually tested.
 
 ## Development
 
@@ -160,7 +156,7 @@ Test MCP locally with:
 npx @modelcontextprotocol/inspector@latest
 ```
 
-Local MCP behavior may be tested before production Access is provisioned, but production authentication must be verified against the deployed Access-protected endpoint.
+Locally, `wrangler dev` simulates the Secrets Store binding; create a local-only secret with `wrangler secrets-store secret create` (see `docs/mcp-authentication.md`) and pass it as `Authorization: Bearer <key>` in MCP Inspector. Production authentication must be verified against the deployed Worker.
 
 ## Verification
 
@@ -170,7 +166,7 @@ npm run check
 
 The final project check should also validate `openapi.yaml` with an OpenAPI 3.2-capable validator. Until that validator is actually wired in, OpenAPI automated validation remains pending.
 
-For production auth, follow `docs/cloudflare-access.md` and verify both allowed and denied identities.
+For production auth, follow `docs/mcp-authentication.md` and verify missing, invalid, and valid bearer credentials against the deployed Worker.
 
 ## Deployment
 
@@ -180,7 +176,7 @@ Production/development CI deployment must be invoked through the reusable workfl
 
 See `docs/cicd.md`.
 
-Do not commit real Cloudflare resource IDs, database credentials, Google OAuth credentials, access tokens, Access assertions, or private analytics payloads.
+Do not commit real Cloudflare resource IDs, database credentials, Google OAuth credentials, bearer API keys, or private analytics payloads.
 
 ## OpenSpec
 
@@ -189,11 +185,13 @@ Start with:
 - `openspec/project.md` — project architecture and boundaries
 - `openspec/specs/analytics-mcp/spec.md` — baseline capability requirements
 - `openspec/changes/bootstrap-analytics-mcp/` — bootstrap design/tasks
-- `openspec/changes/add-cloudflare-access-auth/` — Cloudflare Access authentication decision and rollout tasks
+- `openspec/changes/use-mcp-api-key-auth/` — active dedicated bearer API-key authentication decision
+- `openspec/changes/add-cloudflare-access-auth/` — superseded Cloudflare Access decision (historical only)
 - `openspec/changes/use-centralized-cf-worker-ci/` — organization-managed Cloudflare Worker CI/CD decision
 - `openspec/changes/adopt-openapi-http-contract/` — OpenAPI/Swagger HTTP contract decision
 - `docs/api.md` — OpenAPI/Swagger ownership and drift policy
-- `docs/cloudflare-access.md` — production Access authentication model and operator checklist
+- `docs/mcp-authentication.md` — MCP bearer API-key model, provisioning, client setup, rotation
+- `docs/cloudflare-access.md` — superseded Access notes (historical)
 - `docs/credentials.md` — credential ownership, storage, and exception policy
 - `docs/cicd.md` — reusable deployment workflow policy
 

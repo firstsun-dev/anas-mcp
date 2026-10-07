@@ -62,7 +62,7 @@
 - [ ] Verify `bing_list_sites` reads persisted Windmill-ingested data.
 - [ ] Verify query and page dimensions against a real ingested dataset.
 - [ ] Verify a throttled Windmill fetch leaves the last successful MCP dataset available and reports correct freshness.
-- [ ] Verify production MCP access still passes through Cloudflare Access Managed OAuth.
+- [ ] Verify production MCP access still requires the dedicated bearer API key (`use-mcp-api-key-auth`; supersedes Access Managed OAuth).
 
 ## Superseded implementation evidence
 The earlier direct-Worker implementation demonstrated that the Worker could read the Cloudflare-bound Bing secret and reach Bing, but the provider returned HTTP 400 `{"ErrorCode":17,"Message":"ERROR!!! ThrottleIP"}` from Cloudflare egress. That direct provider implementation is now superseded by this ingestion architecture and must not be merged as the final runtime design.
