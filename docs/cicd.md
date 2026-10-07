@@ -128,7 +128,7 @@ CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
 
-Use least privilege. Do not copy runtime Google OAuth credentials, the MCP API key, Clarity tokens, or PostgreSQL passwords into GitHub Actions secrets solely for deployment.
+Use least privilege. Do not copy runtime Google OAuth credentials, MCP authentication material (Access/Service Token credentials), Clarity tokens, or PostgreSQL passwords into GitHub Actions secrets solely for deployment.
 
 ## Branch behavior
 
@@ -146,11 +146,15 @@ Re-check the current `firstsun-dev/.github` workflow before changing caller assu
 
 Deployment success alone does not prove MCP authentication works.
 
-When the production MCP API key is provisioned, post-deploy verification should cover at minimum:
+Once Cloudflare Access is in front of `/mcp` (`docs/cloudflare-access.md`), post-deploy verification should cover at minimum:
 
-- `/health` returns only minimal readiness without credentials
-- `/mcp` without `Authorization`, or with an invalid bearer value, returns `401` and cannot invoke MCP tools
-- the valid dedicated API key can initialize MCP and list tools (the key must come from an operator-held secret, never from CI logs or committed files)
+- `GET /health` on `https://mcp.firstsun.org` returns only minimal readiness without credentials
+- `/mcp` without credentials is blocked/challenged by Access and cannot invoke MCP tools
+- a Service Token request (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) can initialize MCP and list tools; Managed OAuth is verified interactively. Service Token credentials must come from an operator-held secret, never from CI logs or committed files
+- the Worker rejects a request with no/invalid `Cf-Access-Jwt-Assertion` (covered by unit tests; do not bypass Access to test it in production)
+- `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` are non-empty in the deployed Worker (empty values make `/mcp` return `503`)
+
+This repository currently has no caller workflow, so nothing deploys from `main` yet. Once one is added, rollout ordering in `docs/cloudflare-access.md` applies.
 
 Do not put reusable auth test implementation into the caller workflow if it can be generalized in `firstsun-dev/.github`.
 

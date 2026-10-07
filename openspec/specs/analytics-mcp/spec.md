@@ -267,9 +267,9 @@ Credentials owned by platform integrations or other services SHALL remain with t
 
 
 #### Scenario: MCP clients authenticate
-- WHEN a client authenticates to `/mcp` with the dedicated bearer API key
-- THEN the key is read from the Cloudflare Secrets Store binding and compared in the Worker
-- AND the key and the supplied `Authorization` header SHALL NOT be persisted, logged, or returned
+- WHEN a client authenticates to `/mcp` through Cloudflare Access with Managed OAuth or an Access Service Token
+- THEN the Worker validates the resulting `Cf-Access-Jwt-Assertion` (signature, issuer, application AUD, time validity) before MCP initialization
+- AND OAuth tokens, Service Token credentials, the assertion, and `Authorization` headers SHALL NOT be persisted, logged, or returned
 
 #### Scenario: Worker accesses PostgreSQL
 - WHEN the Worker accesses PostgreSQL through Hyperdrive
@@ -297,7 +297,7 @@ Analytics tools SHALL enforce bounded request and response sizes.
 - THEN the service clamps or rejects the request with a clear validation error
 
 ### Requirement: Minimal health endpoint
-`/health` MAY remain unauthenticated while `/mcp` requires bearer authentication, but it SHALL expose no sensitive state.
+`/health` MAY remain unauthenticated while `/mcp` requires a valid Cloudflare Access assertion, but it SHALL expose no sensitive state.
 
 #### Scenario: Health check is requested
 - WHEN a caller requests `/health`
