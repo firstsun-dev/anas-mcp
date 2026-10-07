@@ -1,3 +1,5 @@
+> **Status: superseded by concurrent dual-mode Access authentication (2026-10-07).** The Worker-local bearer API-key implementation from PR #8 is transitional. The active architecture uses Managed OAuth and Cloudflare Access Service Tokens simultaneously, with Worker validation of the Access assertion. See `openspec/changes/support-dual-access-auth/`.
+
 # Tasks: dedicated bearer API-key authentication
 
 ## OpenSpec decision

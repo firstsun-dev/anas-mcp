@@ -1,4 +1,4 @@
-> **Status: superseded (2026-10-07).** This change records the earlier Cloudflare Access Managed OAuth decision and is retained for historical rationale only. The active production authentication decision is `openspec/changes/use-mcp-api-key-auth/`, which uses a dedicated bearer API key stored in Cloudflare Secrets Store. Do not execute the rollout tasks in this superseded change.
+> **Status: superseded by concurrent dual-mode Access authentication (2026-10-07).** Managed OAuth remains part of the active architecture, but OAuth-only is no longer the complete decision. See `openspec/changes/support-dual-access-auth/`: Managed OAuth and Access Service Tokens are supported simultaneously on the same production MCP resource.
 
 # Tasks: Cloudflare Access authentication
 
