@@ -50,15 +50,15 @@ If served by this Worker in a future change, prefer routes such as:
 
 or equivalent static/generated documentation paths.
 
-Do not expose credentials, bearer API keys, provider tokens, Hyperdrive connection details, or analytics payload examples containing private production data in Swagger/OpenAPI documentation.
+Do not expose credentials, Access assertions, OAuth tokens, Service Token secrets, provider tokens, Hyperdrive connection details, or analytics payload examples containing private production data in Swagger/OpenAPI documentation.
 
 Whether `/docs` is public or Access-protected must be an explicit decision. A public schema is acceptable only if it contains no sensitive operational information.
 
-## Bearer API-key representation
+## Cloudflare Access representation
 
-Production `/mcp` requires `Authorization: Bearer <ANAS_MCP_API_KEY>`, a dedicated service-level key validated by the Worker against Cloudflare Secrets Store. `openapi.yaml` models this as the HTTP bearer security scheme `McpApiKeyBearer`.
+Production `/mcp` is protected by one Cloudflare Access application that concurrently accepts Mode A (Managed OAuth) and Mode B (Access Service Token). `openapi.yaml` lists both as alternative security requirements: `CloudflareAccessOAuth` (`oauth2`, authorization code) and `CloudflareAccessServiceToken` (header `CF-Access-Client-Id`, used together with `CF-Access-Client-Secret`). OAuth discovery/authorization/token endpoints are owned by Cloudflare Access and are not implemented or enumerated by the Worker.
 
-The contract documents `401` (missing/invalid credential, with `WWW-Authenticate: Bearer`). There is no per-user authorization, so no identity-based `403` is documented. No OAuth endpoints exist, and no example credential is embedded. See `docs/mcp-authentication.md`.
+The contract documents the Worker-origin responses `401` (no valid `Cf-Access-Jwt-Assertion`) and `503` (Worker Access configuration missing; fails closed). Access's own challenges/denials happen at the edge and never reach the Worker. `/health` is outside the Access application (`security: []`). No example credential, token, assertion, or production AUD is embedded. See `docs/mcp-authentication.md`.
 
 ## MCP transport
 

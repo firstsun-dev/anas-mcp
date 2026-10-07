@@ -1,31 +1,43 @@
 import { createMcpHandler } from "agents/mcp/server";
-import { isAuthorized, unauthorizedResponse } from "./auth/mcp-api-key";
+import type { JWTVerifyGetKey } from "jose";
+import { authUnavailableResponse, unauthorizedResponse, verifyAccessAssertion } from "./auth/cloudflare-access";
 import { createServer } from "./server";
 
 export interface Env {
   /** Read-only Hyperdrive binding to the windmill_pipeline PostgreSQL database (schema blog_analytics). */
   ANALYTICS_DB?: Hyperdrive;
-  /** Cloudflare Secrets Store binding for the dedicated anas-mcp bearer API key. Async: use `.get()`. */
-  ANAS_MCP_API_KEY?: SecretsStoreSecret;
+  /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`). Non-secret; owned by infra-config. */
+  ACCESS_TEAM_DOMAIN?: string;
+  /** AUD tag of the Access application protecting `/mcp`. Non-secret; owned by infra-config. */
+  ACCESS_AUD?: string;
 }
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    const url = new URL(request.url);
+/** `getKey` is injectable for tests; production resolves keys from the team's Access JWKS. */
+export function createHandler(getKey?: JWTVerifyGetKey): ExportedHandler<Env> {
+  return {
+    async fetch(request, env, ctx) {
+      const url = new URL(request.url);
 
-    if (request.method === "GET" && url.pathname === "/health") {
-      return Response.json({ service: "anas-mcp", status: "ok" });
-    }
+      if (request.method === "GET" && url.pathname === "/health") {
+        return Response.json({ service: "anas-mcp", status: "ok" });
+      }
 
-    // Authenticate before MCP initialization, createServer(), or any tool/database access.
-    if (!(await isAuthorized(request, env.ANAS_MCP_API_KEY))) {
-      return unauthorizedResponse();
-    }
+      // Validate the Cloudflare Access assertion (Managed OAuth and Service Token both arrive as one) before MCP
+      // initialization, createServer(), or any tool/database access.
+      const access = await verifyAccessAssertion(
+        request,
+        { teamDomain: env.ACCESS_TEAM_DOMAIN, audience: env.ACCESS_AUD },
+        getKey,
+      );
+      if (!access.ok) {
+        // `reason` is a fixed non-sensitive code; never log headers, tokens, or claims.
+        console.warn(JSON.stringify({ event: "access_rejected", reason: access.reason }));
+        return access.kind === "misconfigured" ? authUnavailableResponse() : unauthorizedResponse();
+      }
 
-    return createMcpHandler(() => createServer(env), { route: "/mcp" })(
-      request,
-      env,
-      ctx,
-    );
-  },
-} satisfies ExportedHandler<Env>;
+      return createMcpHandler(() => createServer(env), { route: "/mcp" })(request, env, ctx);
+    },
+  };
+}
+
+export default createHandler() satisfies ExportedHandler<Env>;

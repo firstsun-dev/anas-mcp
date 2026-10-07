@@ -29,12 +29,18 @@ describe("repository guardrails", () => {
     expect(service).toMatch(/READ ONLY/);
     expect(service).not.toMatch(/export\s+(async\s+)?function\s+(executeSql|rawQuery)/);
   });
-  it("wrangler.jsonc binds only the MCP API key from Secrets Store (no Bing binding) and uses the ANALYTICS_DB Hyperdrive binding", () => {
+  it("wrangler.jsonc has only non-secret Access vars, no Secrets Store bindings, and the ANALYTICS_DB Hyperdrive binding", () => {
     const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;
-    expect(config.secrets_store_secrets).toEqual([expect.objectContaining({ binding: "ANAS_MCP_API_KEY" })]);
-    expect(config.vars).toBeUndefined();
+    expect(config.secrets_store_secrets).toBeUndefined();
+    expect(Object.keys(config.vars ?? {}).sort()).toEqual(["ACCESS_AUD", "ACCESS_TEAM_DOMAIN"]);
     expect(config.hyperdrive).toEqual([expect.objectContaining({ binding: "ANALYTICS_DB" })]);
     expect(JSON.stringify(config)).not.toMatch(/bing|apikey|postgres(ql)?:\/\//i);
+  });
+  it("the transitional Worker-local API key is fully removed (Access JWT is the only production gate)", () => {
+    expect(sourceFiles("src")).not.toContain("src/auth/mcp-api-key.ts");
+    const code = stripComments(allSource() + read("wrangler.jsonc"));
+    expect(code).not.toMatch(/ANAS_MCP_API_KEY|ANAS_PROD_MCP_API_KEY|SecretsStoreSecret|secrets_store/);
+    expect(code).not.toMatch(/headers\.get\(["']authorization["']\)/i);
   });
   it("no database URL or credential is committed in config or source", () => {
     expect(stripComments(read("wrangler.jsonc")) + stripComments(allSource())).not.toMatch(/postgres(ql)?:\/\/[^\s"']*@/i);
