@@ -5,18 +5,19 @@ Provide ChatGPT and other MCP clients with safe, read-only access to Firstsun an
 
 ## Authentication strategy
 
-Production MCP access is authenticated and authorized by **Cloudflare Access**.
+Production MCP access uses a **dedicated application bearer API key**.
 
-- The production `/mcp` resource SHALL sit behind a Cloudflare Access self-hosted application with **Managed OAuth** enabled.
-- MCP clients such as ChatGPT authenticate through Access using standards-based OAuth discovery and the authorization-code flow with PKCE.
-- Cloudflare Access policies are the primary user authorization boundary. Production policy should be default-deny and explicitly allow approved Firstsun identities/groups.
-- `anas-mcp` SHALL NOT implement a parallel username/password system or a custom long-lived shared-token scheme for normal interactive MCP access.
-- Do not authenticate ChatGPT by OpenAI IP allowlists, User-Agent matching, query-string secrets, or a shared static bearer token.
-- Access-managed OAuth state and access tokens are owned by Cloudflare Access; `anas-mcp` does not persist MCP OAuth token state in KV, D1, Durable Objects, or PostgreSQL.
-- The Worker may consume only the minimum authenticated identity/context forwarded by Access when needed for authorization or audit; it must not expose Access tokens or identity assertions to MCP tool results.
-- `/health` may remain unauthenticated when Access is scoped specifically to `/mcp`; it must expose readiness only and no configuration or credential state.
+- Every production `/mcp` request SHALL provide `Authorization: Bearer <token>`.
+- The credential SHALL be a dedicated high-entropy secret for `anas-mcp`; it SHALL NOT be a Cloudflare API token, provider token, database password, or other credential reused from another system.
+- The production secret SHALL be stored in Cloudflare Secrets Store under an application binding such as `ANAS_MCP_API_KEY`; it SHALL NOT be committed, placed in Wrangler `vars`, or logged.
+- The Worker SHALL reject a missing or invalid bearer credential before MCP initialization or tool execution.
+- The current model is service-level rather than per-user: possession of the dedicated key authorizes the caller to the existing read-only MCP surface.
+- Do not authenticate clients by query-string secrets, OpenAI IP allowlists, User-Agent matching, or Cloudflare account/deployment tokens.
+- The Worker remains stateless for MCP client authentication; no OAuth state, user database, KV, D1, Durable Object, or PostgreSQL auth table is required for the current model.
+- `/health` MAY remain unauthenticated, but it must expose readiness only and no configuration, credential, or analytics state.
+- OAuth or identity-aware authentication SHALL be reconsidered through a separate OpenSpec change if the service later needs multiple human users, per-user revocation/audit, delegated third-party access, or per-user/per-tool authorization.
 
-This decision is specified in `openspec/changes/add-cloudflare-access-auth/` and `docs/cloudflare-access.md`.
+This decision is specified in `openspec/changes/use-mcp-api-key-auth/`. The earlier `openspec/changes/add-cloudflare-access-auth/` decision is retained only as superseded historical rationale.
 
 ## CI/CD strategy
 
@@ -82,7 +83,7 @@ This decision is specified in `openspec/changes/adopt-openapi-http-contract/` an
 - Production secrets MUST NOT use Wrangler `vars`, committed configuration, `.env`, `.dev.vars`, source code, or logs.
 - `wrangler secret` is not the preferred production store; using it when Secrets Store is available requires an accepted OpenSpec exception.
 - Runtime Google access tokens are derived from the stored OAuth credential and remain runtime-only; they are not persisted.
-- Cloudflare Access Managed OAuth credentials/tokens are platform-managed and are not duplicated into `anas-mcp` Secrets Store.
+- The dedicated production MCP bearer API key is application-owned and SHALL be stored in Cloudflare Secrets Store; it SHALL NOT be reused as a Cloudflare account/deployment credential.
 - Bing Webmaster and Clarity upstream credentials remain owned by the Windmill ingestion project and are not copied into `anas-mcp`.
 - Database credentials are owned by Hyperdrive and MUST NOT be duplicated into Secrets Store or Worker configuration; the database role must be read-only.
 - CI/deployment bootstrap credentials may live in the CI provider's protected secret store only when they are required before Cloudflare Secrets Store can be accessed; for this project, deployment must flow through the reusable workflow in `firstsun-dev/.github`.
@@ -156,12 +157,12 @@ MCP tool contracts
 - Return machine-readable structured content plus concise text summaries where useful.
 - Bound result sizes to keep MCP responses predictable.
 - Treat analytics data as potentially sensitive operational data; do not log row-level payloads by default.
-- All production MCP tool invocations must arrive through the Cloudflare Access authorization boundary.
+- All production MCP tool invocations must pass the dedicated bearer API-key gate before tool execution.
 
 ## Initial capability roadmap
 1. MCP foundation and health endpoint.
 2. OpenAPI 3.2 HTTP contract and automated validation.
-3. Cloudflare Access Managed OAuth protection for production `/mcp`.
+3. Dedicated bearer API-key protection for production `/mcp`, with the key stored in Cloudflare Secrets Store.
 4. Centralized Cloudflare Worker CI/CD caller using `firstsun-dev/.github`.
 5. Cloudflare Secrets Store binding and Google OAuth credential loading/access-token exchange.
 6. GA4 generic report, realtime, and metadata tools.

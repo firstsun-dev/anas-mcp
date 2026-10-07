@@ -45,49 +45,49 @@ The project SHALL validate `openapi.yaml` with an OpenAPI 3.2-capable validator 
 - THEN OpenAPI validation SHALL run before deployment
 - AND validation failure SHALL block deployment
 
-### Requirement: Cloudflare Access production authentication
-Production access to `/mcp` SHALL be protected by Cloudflare Access with Managed OAuth enabled.
+### Requirement: Dedicated bearer API-key production authentication
+Production access to `/mcp` SHALL require a dedicated application bearer credential supplied through the HTTP `Authorization` header.
 
 #### Scenario: Unauthenticated MCP client connects
-- GIVEN `/mcp` is deployed behind Cloudflare Access
-- WHEN an unauthenticated standards-compliant MCP client requests the resource
-- THEN Cloudflare Access presents standards-based OAuth discovery/authentication behavior
-- AND the client is not allowed to invoke MCP tools before successful authentication
+- WHEN a client requests `/mcp` without `Authorization: Bearer <token>`
+- THEN the request SHALL be rejected before MCP initialization or tool execution
+- AND the response SHALL NOT reveal the configured credential or secret-binding details
 
-#### Scenario: Authorized user connects from ChatGPT
-- GIVEN the user matches an approved Cloudflare Access policy
-- WHEN ChatGPT completes the Access Managed OAuth authorization flow with PKCE
-- THEN Access permits the authenticated request to reach `/mcp`
-- AND the MCP client can initialize and invoke tools permitted by the service
+#### Scenario: Client presents an invalid bearer credential
+- WHEN a client requests `/mcp` with an invalid bearer token
+- THEN the request SHALL be rejected
+- AND no MCP tool SHALL execute
 
-#### Scenario: User is not allowed by Access policy
-- GIVEN the user does not match an allow policy
-- WHEN the user attempts the Access authorization flow
-- THEN access to `/mcp` is denied
-- AND the Worker does not bypass the Access decision
+#### Scenario: Authorized MCP client connects
+- GIVEN the client is configured with the dedicated `anas-mcp` bearer credential
+- WHEN it requests `/mcp` with the valid `Authorization: Bearer` value
+- THEN the request MAY reach MCP initialization
+- AND the client can invoke the existing read-only tool surface
 
-### Requirement: No parallel static-token authentication
-The normal production ChatGPT/MCP authentication path SHALL NOT use a shared static bearer token or client-identification heuristics.
+### Requirement: MCP API-key isolation
+The production MCP bearer credential SHALL be application-specific, high entropy, and stored in Cloudflare Secrets Store.
 
-#### Scenario: Alternative authentication is proposed
-- WHEN an implementation proposes OpenAI IP allowlisting, User-Agent matching, query-string tokens, or a shared long-lived bearer token as the primary interactive MCP authentication mechanism
-- THEN the proposal SHALL be rejected unless a new accepted OpenSpec change explicitly supersedes the Cloudflare Access decision
+#### Scenario: Production MCP credential is provisioned
+- WHEN production authentication is configured
+- THEN the credential SHALL be stored through Cloudflare Secrets Store under an application binding such as `ANAS_MCP_API_KEY`
+- AND it SHALL NOT be committed, stored in Wrangler `vars`, written to logs, or returned to MCP clients
+- AND it SHALL NOT reuse `CLOUDFLARE_API_TOKEN`, a provider token, a database password, or another system credential
 
-### Requirement: Access-owned OAuth state
-Cloudflare Access Managed OAuth SHALL own MCP client authentication state and tokens at the edge.
+### Requirement: Stateless service-level authentication
+The current MCP authentication model SHALL remain stateless and SHALL NOT introduce per-user identity infrastructure solely to protect the single-owner read-only service.
 
-#### Scenario: MCP authentication state is required
-- WHEN ChatGPT authenticates to the protected `/mcp` resource
-- THEN `anas-mcp` SHALL NOT introduce KV, D1, Durable Objects, PostgreSQL, or another application datastore solely to persist MCP OAuth state/tokens
-- AND Access-managed token material SHALL NOT be copied into application storage or MCP responses
+#### Scenario: Authentication state is evaluated
+- WHEN a request is authenticated
+- THEN possession of the valid dedicated bearer credential is sufficient for the current service-level authorization boundary
+- AND the Worker SHALL NOT require OAuth state, KV, D1, Durable Objects, PostgreSQL auth tables, or an application user database for that decision
 
-### Requirement: Authenticated identity minimization
-The Worker MAY consume authenticated identity/context forwarded by Cloudflare Access only when necessary for authorization, audit, or future per-user policy.
+### Requirement: Identity-aware authentication is a future decision
+OAuth or another identity-aware authentication layer SHALL require a separate accepted OpenSpec change before it replaces the bearer API-key boundary.
 
-#### Scenario: Tool handler uses authenticated identity
-- WHEN a tool needs caller identity
-- THEN it uses the minimum trusted Access-provided identity/context available to the request
-- AND it SHALL NOT return raw Access tokens, identity assertions, or security headers to the MCP client
+#### Scenario: Per-user authorization becomes necessary
+- WHEN requirements include multiple independently authorized users, per-user revocation/audit, delegated third-party access, or per-user/per-tool policy
+- THEN the project SHALL evaluate an identity-aware authentication mechanism
+- AND SHALL NOT silently repurpose the current shared service credential as a user identity mechanism
 
 ### Requirement: Centralized Cloudflare Worker CI/CD
 Production and development Worker deployment SHALL use the reusable Cloudflare Worker pipeline maintained in `firstsun-dev/.github` rather than a duplicated deployment implementation in `anas-mcp`.
