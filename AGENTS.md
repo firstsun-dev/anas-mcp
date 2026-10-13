@@ -47,7 +47,7 @@ npm install
 npm run check
 ```
 
-For HTTP surface changes, also validate `openapi.yaml` with the project-selected OpenAPI 3.2-capable validator and ensure Swagger-compatible rendering remains valid. Do not claim OpenAPI validation complete until that validator is actually wired into the project check/CI path.
+For HTTP surface changes, also validate `openapi.yaml` with `npm run lint:openapi` (wired into `npm run check`; see `docs/api.md#validation`) and ensure Swagger-compatible rendering remains valid.
 
 For MCP behavior changes also run the Worker locally and validate `/mcp` using MCP Inspector. Production authentication is not verified until the deployed system has been tested through Cloudflare Access with Managed OAuth and a Service Token (concurrently), a blocked identity, and an invalid/revoked Service Token; ChatGPT compatibility must not be claimed unless actually tested from ChatGPT.
 

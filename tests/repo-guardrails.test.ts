@@ -36,6 +36,15 @@ describe("repository guardrails", () => {
     expect(config.hyperdrive).toEqual([expect.objectContaining({ binding: "ANALYTICS_DB" })]);
     expect(JSON.stringify(config)).not.toMatch(/bing|apikey|postgres(ql)?:\/\//i);
   });
+  it("workers.dev and Version/Preview URLs are disabled so Access on the custom domain cannot be bypassed", () => {
+    // workers.dev and Version/Preview URLs are a separate ingress that does not go through the Access
+    // application attached to the custom domain. If either were left enabled (or omitted, since `workers_dev`
+    // defaults to `true` when no `routes`/`route` field is configured here), `/mcp` would be reachable without
+    // a Cloudflare Access assertion. See wrangler.jsonc and docs/cloudflare-access.md.
+    const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;
+    expect(config.workers_dev).toBe(false);
+    expect(config.preview_urls).toBe(false);
+  });
   it("the transitional Worker-local API key is fully removed (Access JWT is the only production gate)", () => {
     expect(sourceFiles("src")).not.toContain("src/auth/mcp-api-key.ts");
     const code = stripComments(allSource() + read("wrangler.jsonc"));

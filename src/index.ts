@@ -32,7 +32,7 @@ export function createHandler(getKey?: JWTVerifyGetKey): ExportedHandler<Env> {
       if (!access.ok) {
         // `reason` is a fixed non-sensitive code; never log headers, tokens, or claims.
         console.warn(JSON.stringify({ event: "access_rejected", reason: access.reason }));
-        return access.kind === "misconfigured" ? authUnavailableResponse() : unauthorizedResponse();
+        return access.kind === "unauthorized" ? unauthorizedResponse() : authUnavailableResponse();
       }
 
       return createMcpHandler(() => createServer(env), { route: "/mcp" })(request, env, ctx);

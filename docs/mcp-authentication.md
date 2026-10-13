@@ -28,8 +28,8 @@ Cloudflare configuration (custom domain, Access application, Managed OAuth, poli
 - Every request except `GET /health` is checked **before** MCP initialization, `createServer()`, or any tool or database (Hyperdrive/PostgreSQL) access.
 - The Worker reads `Cf-Access-Jwt-Assertion` and verifies, with `jose`: RS256 signature against the team JWKS (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`), issuer `https://<team>.cloudflareaccess.com`, application AUD, `exp`, and `nbf` (5 s clock tolerance). `exp`, `iss`, and `aud` are required claims; other algorithms (including `none`) are rejected.
 - The Worker does **not** try to tell OAuth from Service Token. Both arrive as the same Access assertion. It never reads `Authorization`, `CF-Access-Client-Id`, or `CF-Access-Client-Secret`.
-- Missing or invalid assertion: `401 {"error":"unauthorized"}` (identical for every cause).
-- Missing or invalid Worker configuration (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`): `503 {"error":"auth_unavailable"}`. The Worker fails closed rather than skipping validation.
+- Missing or invalid assertion (bad signature, wrong/unknown key id, wrong issuer/AUD, expired, not-yet-valid, wrong algorithm): `401 {"error":"unauthorized"}` (identical for every cause).
+- Missing or invalid Worker configuration (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), **or** the Access JWKS itself could not be fetched (network error, timeout, non-200, bad JSON): `503 {"error":"auth_unavailable"}`. The Worker fails closed rather than treating "I could not check" as "denied" or, worse, "allowed". A JWKS that fetches successfully but does not contain the token's key id is still a `401` (the service is available; the token is not valid), not a `503`.
 - Rejections log only `{"event":"access_rejected","reason":"<fixed code>"}` (for example `missing_assertion`, `ERR_JWT_EXPIRED`). Assertions, tokens, headers, claims, and the AUD are never logged or returned.
 - `GET /health` is public and returns only `{"service":"anas-mcp","status":"ok"}`. Access protects `/mcp` only.
 

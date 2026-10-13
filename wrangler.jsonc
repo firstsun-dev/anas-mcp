@@ -7,6 +7,14 @@
   "observability": {
     "enabled": true
   },
+  // `workers.dev` and Version/Preview URLs are a separate ingress path that does not go through the
+  // Cloudflare Access application protecting the custom domain (Access is attached to the zone/hostname, not to
+  // the Worker itself). Verified against current Wrangler docs (workers.dev / preview_urls config reference,
+  // 2026-10): leaving either enabled would let a client reach `/mcp` without an Access-issued
+  // `Cf-Access-Jwt-Assertion`, bypassing the dual OAuth/Service-Token gate entirely. Both are explicitly disabled
+  // so the only reachable ingress is the custom domain that infra-config attaches to the Access application.
+  "workers_dev": false,
+  "preview_urls": false,
   // Read-only PostgreSQL access (Windmill-ingested blog_analytics data). The database credential is owned by
   // the Hyperdrive configuration and must never be copied into this file or Secrets Store.
   // Local dev: set WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_ANALYTICS_DB to a local Postgres URL.

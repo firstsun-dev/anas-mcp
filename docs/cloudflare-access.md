@@ -11,6 +11,24 @@ Production `/mcp` is protected by one Cloudflare Access application that concurr
 
 Do not provision or mutate Access resources from this repository, and do not hand-configure production state in the dashboard.
 
+## Ingress hardening: no alternative path around Access
+
+Cloudflare Access is attached to the custom domain/hostname (`mcp.firstsun.org`), not to the Worker itself. A
+Worker also has two other built-in ingress paths that do **not** go through that Access application unless
+separately protected: the `workers.dev` subdomain and Version/Preview URLs. `wrangler.jsonc` sets both
+`workers_dev: false` and `preview_urls: false` so neither is reachable; `tests/repo-guardrails.test.ts` fails the
+build if either flips back to enabled (or is removed, since `workers_dev` defaults to `true` whenever the config
+has no `routes`/`route`, which is the case here because the custom domain is attached by infra-config Terraform,
+not by a `routes` entry in this file). Verified against the Wrangler configuration reference and the Workers
+Preview URLs documentation (2026-10).
+
+This is a guardrail on the Worker's own config, not a substitute for end-to-end verification. **Outstanding, not
+yet verified**: after the next deploy, confirm from a plain `curl` that the Worker's `*.workers.dev` hostname and
+any Version/Preview URL return no reachable `/mcp` (disabled subdomains normally 404/not-found at the Cloudflare
+edge before reaching the Worker), and that the only way to reach `/mcp` is through `https://mcp.firstsun.org/mcp`
+once infra-config's Access application is applied. This repository cannot observe or assert live Cloudflare
+account/zone state; only the operator can confirm it after deploy.
+
 ## Values the Worker needs (non-secret)
 
 `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in `wrangler.jsonc` `vars`, taken from the infra-config Terraform outputs after the Access application is applied. They are identifiers, not credentials.

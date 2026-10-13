@@ -77,7 +77,8 @@ paths:
         the Worker; Access answers with its own challenge/denial.
       security:
         - CloudflareAccessOAuth: []
-        - CloudflareAccessServiceToken: []
+        - CloudflareAccessServiceTokenId: []
+          CloudflareAccessServiceTokenSecret: []
       requestBody:
         required: true
         content:
@@ -86,7 +87,10 @@ paths:
               $ref: '#/components/schemas/McpProtocolMessage'
       responses:
         '200':
-          description: MCP protocol response or stream
+          description: >-
+            MCP protocol response. `application/json` for a single response;
+            `text/event-stream` when the client negotiates the Streamable
+            HTTP transport's SSE stream.
           content:
             application/json:
               schema:
@@ -94,7 +98,6 @@ paths:
             text/event-stream:
               schema:
                 type: string
-              description: Streamable MCP response when negotiated by the transport.
         '202':
           description: MCP notification/request accepted when the protocol operation does not require an immediate response body.
         '400':
@@ -132,24 +135,45 @@ components:
     CloudflareAccessOAuth:
       type: oauth2
       description: |
-        Mode A. Cloudflare Access Managed OAuth (authorization code + PKCE).
-        Discovery, dynamic client registration, authorization, and token
-        endpoints are owned by Cloudflare Access and advertised by it; they are
-        not implemented by this Worker and are intentionally not enumerated here.
+        Mode A. Cloudflare Access "Managed OAuth" for MCP servers (authorization
+        code + PKCE). Cloudflare Access, not this Worker, serves the actual
+        `authorization_endpoint` and `token_endpoint`, and they are not fixed
+        values this contract can hard-code: a client MUST first fetch OAuth
+        Authorization Server Metadata (RFC 8414 / RFC 9728) from
+
+          GET https://mcp.firstsun.org/.well-known/oauth-authorization-server
+
+        and use the `authorization_endpoint` / `token_endpoint` returned there.
+        The `authorizationUrl` / `tokenUrl` below point at that discovery
+        document rather than at a literal authorize/token endpoint, because the
+        OpenAPI oauth2 flow object requires fixed URLs and Access does not
+        publish fixed ones for this flow. See
+        https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/.
+        Dynamic client registration, consent, and token issuance are owned by
+        Cloudflare Access and are not implemented by this Worker.
       flows:
         authorizationCode:
-          authorizationUrl: https://{accessTeamDomain}/cdn-cgi/access/oauth/authorization
-          tokenUrl: https://{accessTeamDomain}/cdn-cgi/access/oauth/token
+          authorizationUrl: https://mcp.firstsun.org/.well-known/oauth-authorization-server
+          tokenUrl: https://mcp.firstsun.org/.well-known/oauth-authorization-server
           scopes: {}
-    CloudflareAccessServiceToken:
+    CloudflareAccessServiceTokenId:
       type: apiKey
       in: header
       name: CF-Access-Client-Id
       description: |
-        Mode B. Cloudflare Access Service Token, sent with BOTH headers
-        `CF-Access-Client-Id` and `CF-Access-Client-Secret` and authorized by an
-        Access `Service Auth` policy. The secret is held by the machine client's
-        operator and is never stored by or sent to the Worker.
+        Mode B, part 1 of 2 (required together with
+        `CloudflareAccessServiceTokenSecret`). Cloudflare Access Service Token
+        Client ID, authorized by an Access `Service Auth` policy. Holding this
+        header alone is not sufficient; see `CloudflareAccessServiceTokenSecret`.
+    CloudflareAccessServiceTokenSecret:
+      type: apiKey
+      in: header
+      name: CF-Access-Client-Secret
+      description: |
+        Mode B, part 2 of 2 (required together with
+        `CloudflareAccessServiceTokenId`). Cloudflare Access Service Token
+        Client Secret. Held by the machine client's operator; never stored by
+        or sent to this Worker (Access validates it at the edge).
   schemas:
     UnauthorizedResponse:
       type: object

@@ -1,5 +1,6 @@
+import { JWKSInvalid, JWKSNoMatchingKey, JWKSTimeout } from "jose/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "../src/index";
+import { createHandler, type Env } from "../src/index";
 import { verifyAccessAssertion } from "../src/auth/cloudflare-access";
 import {
   TEST_AUD,
@@ -115,6 +116,26 @@ describe("/mcp Cloudflare Access assertion validation", () => {
       expect(pg.constructed).toBe(0);
     }
   });
+  it("fails closed with a generic 503, not 401, when the Access JWKS cannot be fetched (outage/timeout)", async () => {
+    const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
+    for (const thrown of [new JWKSTimeout(), new TypeError("fetch failed"), new DOMException("The operation was aborted.", "AbortError")]) {
+      const flaky = createHandler(async () => {
+        throw thrown;
+      });
+      const res = await flaky.fetch!(
+        new Request("http://localhost/mcp", {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json, text/event-stream", [A]: await signAssertion() },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+        }) as never,
+        accessEnv({ ANALYTICS_DB: hyperdrive }),
+        ctx,
+      );
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: "auth_unavailable" });
+      expect(pg.constructed).toBe(0);
+    }
+  });
   it("does not log assertions, credentials, or auth headers", async () => {
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
     const valid = await signAssertion();
@@ -166,5 +187,42 @@ describe("verifyAccessAssertion", () => {
     expect(signingKey.publicKey).toBeDefined();
     const r = await verifyAccessAssertion(req(await signAssertion({ key: rogueKey.privateKey })), config, async () => signingKey.publicKey);
     expect(r.ok).toBe(false);
+  });
+
+  it("classifies a wrong/unknown kid (JWKS fetched fine, key not found) as unauthorized, not unavailable", async () => {
+    const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
+      throw new JWKSNoMatchingKey();
+    });
+    expect(r).toMatchObject({ ok: false, kind: "unauthorized" });
+  });
+  it("classifies a malformed JWKS document as unauthorized (the fetch itself did not fail)", async () => {
+    const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
+      throw new JWKSInvalid();
+    });
+    expect(r).toMatchObject({ ok: false, kind: "unauthorized" });
+  });
+  it("classifies a JWKS fetch timeout as unavailable (fail closed, not a 401)", async () => {
+    const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
+      throw new JWKSTimeout();
+    });
+    expect(r).toMatchObject({ ok: false, kind: "unavailable" });
+  });
+  it("classifies a network/DNS failure fetching the JWKS as unavailable", async () => {
+    const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
+      throw new TypeError("fetch failed");
+    });
+    expect(r).toMatchObject({ ok: false, kind: "unavailable" });
+  });
+  it("classifies an aborted/timed-out fetch (AbortError) as unavailable", async () => {
+    const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+    expect(r).toMatchObject({ ok: false, kind: "unavailable" });
+  });
+  it("never leaks the thrown error's message in the result", async () => {
+    const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
+      throw new TypeError("super secret internal detail");
+    });
+    expect(JSON.stringify(r)).not.toContain("super secret internal detail");
   });
 });

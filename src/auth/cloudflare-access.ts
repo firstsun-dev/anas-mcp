@@ -9,6 +9,7 @@
  * The assertion, JWKS material, and expected AUD must never be logged or echoed in a response.
  */
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
+import { JOSEError, JWKSTimeout } from "jose/errors";
 
 export const ACCESS_ASSERTION_HEADER = "cf-access-jwt-assertion";
 
@@ -24,7 +25,9 @@ export type AccessResult =
   /** Missing/invalid assertion. `reason` is a fixed, non-sensitive code safe to log. */
   | { ok: false; kind: "unauthorized"; reason: string }
   /** Worker is not configured to validate assertions; fails closed. */
-  | { ok: false; kind: "misconfigured"; reason: string };
+  | { ok: false; kind: "misconfigured"; reason: string }
+  /** Assertion could not be verified because the Access JWKS could not be fetched; fails closed. */
+  | { ok: false; kind: "unavailable"; reason: string };
 
 const TEAM_DOMAIN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.cloudflareaccess\.com$/i;
 /** Small allowance for clock skew between Cloudflare and the Worker isolate, in seconds. */
@@ -72,6 +75,21 @@ export async function verifyAccessAssertion(
   } catch (error) {
     // Only jose's stable error code is surfaced; never the token, claims, or key material.
     const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "verification_failed";
+
+    // `createRemoteJWKSet`'s key getter throws when the JWKS itself could not be fetched (network error, non-200,
+    // bad JSON, or a timeout) rather than when the token/claims are invalid. That is a service-availability
+    // problem, not proof the caller is unauthorized, so it fails closed as 503 instead of a misleading 401.
+    // `JWKSNoMatchingKey` (wrong/unknown `kid` in an otherwise-fetched JWKS) and `JWKSMultipleMatchingKeys` are
+    // deliberately NOT included here: the JWKS fetch succeeded, so an unrecognized key is a verification failure
+    // (unauthorized), not an availability failure.
+    const isJwksUnavailable =
+      error instanceof JWKSTimeout || // request timed out
+      (error instanceof JOSEError && error.code === "ERR_JOSE_GENERIC") || // generic fetch/non-200/JSON-parse failure
+      !(error instanceof JOSEError); // raw network error (DNS, TLS, fetch rejection) not wrapped by jose
+    if (isJwksUnavailable) {
+      return { ok: false, kind: "unavailable", reason: "jwks_unavailable" };
+    }
+
     return { ok: false, kind: "unauthorized", reason: code };
   }
 }

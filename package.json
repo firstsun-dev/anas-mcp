@@ -8,7 +8,8 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test"
+    "lint:openapi": "redocly lint openapi.yaml",
+    "check": "npm run typecheck && npm run test && npm run lint:openapi"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260921.1",
+    "@redocly/cli": "^2.62.1",
     "@types/node": "^24.3.1",
     "@types/pg": "^8.15.5",
     "typescript": "^5.9.2",
