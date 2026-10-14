@@ -43,6 +43,12 @@
 - [x] Remove active documentation that presents the Worker-local API key as production auth.
 - [x] Preserve historical OpenSpec/PR evidence without treating it as active architecture.
 
+## Rollout, rollback and MCP host/origin hardening (PR #10 fourth review)
+- [x] Document the coordinated Worker + Access + routing rollout, the conditions under which a Worker-only rollback is safe, when Access/routing must also be restored, a decision matrix, stop conditions and recovery validation (`docs/cloudflare-access.md`).
+- [x] Verify the Agents SDK's real Host/Origin handling and add explicit `allowedHostnames` (`mcp.firstsun.org` plus localhost) and `allowedOriginHostnames: []`; no wildcard.
+- [x] Add `tests/mcp-host-origin.test.ts` and guardrails; document the `403` in `openapi.yaml`.
+- [ ] Execute the rollout/rollback plan against production (requires operator authorization; not done).
+
 ## E2E
 - [ ] Managed OAuth: ChatGPT can authenticate, initialize, list tools, and call a read-only tool.
 - [ ] Managed OAuth: denied identity cannot initialize MCP.
@@ -86,3 +92,10 @@
 - `openapi.yaml` updated for Access (`CloudflareAccessOAuth`, `CloudflareAccessServiceToken`, `401`, `503`). `npx @redocly/cli lint` reports one structural error on the pre-existing `text/event-stream` `description` line and a missing `license`; no OpenAPI 3.2 validator is wired into `npm run check`, so OpenAPI validation is still NOT complete.
 - Deployment behavior (verified): this repository has no `.github/workflows` caller, no Actions runs, and no GitHub deployments, so merging to `main` does not deploy; what is live in production and how it was deployed is unverified. Rollout ordering is in `docs/cloudflare-access.md`.
 - NOT done and NOT claimed: every Cloudflare Access, Service Token, and E2E item above (blocked on `firstsun-dev/infra-config#59` being applied), filling `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` (values only exist after the Access application is applied), deleting the old `ANAS_PROD_MCP_API_KEY` secret from Secrets Store, ChatGPT OAuth E2E, Service Token production E2E, concurrent A+B validation, and production log inspection.
+
+2026-10-14 (PR #10 fourth review follow-up, branch `feat/dual-access-auth`):
+- Rollback (P1): `docs/cloudflare-access.md` rewritten. The previous Worker (PR #8) gates on a Worker-local bearer key and cannot serve Access-authenticated clients; the new Worker needs an Access assertion and cannot serve API-key clients; Access, its AUD tag, the domain attachment and the legacy secret are not restored by a Worker rollback. Rollout order corrected (the AUD only exists after Terraform applies). All states are documented as fail-closed; rules forbid rolling back past PR #8, Bypass policies, re-enabling workers.dev, and deleting the legacy secret early. This is a plan: no Terraform, deploy, Access change or rollback was run, and `infra-config` PR #68 being merged is still not evidence of an apply.
+- Host/Origin (P2): read the installed `agents@0.22` handler source (`dist/handler-stateless-*.js`) and `@modelcontextprotocol/server` validators. Findings: the SDK validates `Host` only for localhost and `workers.dev` endpoints and "relies on Cloudflare routing" for custom domains; Origin is validated by default (present Origins other than localhost-class, the `workers.dev` host and a concrete `corsOptions.origin` are rejected with 403; absent Origin passes). Reproduced with failing tests first: an authenticated request for `evil.example`, a `*.workers.dev` name or a bare IP returned 200, and a `http://localhost:3000` Origin was accepted. Fix in `src/index.ts`: `allowedHostnames: ["mcp.firstsun.org", ...localhost]`, `allowedOriginHostnames: []` (browser clients unsupported; server-to-server clients send no Origin and still pass). Authentication still runs first, so unauthenticated callers always get the generic 401. Not changed: SDK default CORS headers, which are emitted on responses but grant nothing to a request that is rejected for Origin.
+- CI (P2): see `use-centralized-cf-worker-ci`. Added test-only `.github/workflows/pr-verify.yml`.
+- Results: see the PR description for the final `npm ci` / `npm run check` / `wrangler deploy --dry-run` output; GitHub-side CI status is only claimed once a run exists.
+- NOT done and NOT claimed: Terraform applied, Managed OAuth with ChatGPT, Service Token against the live endpoint, both modes concurrently in production, `workers.dev`/preview ingress actually restricted in production, ChatGPT sending no `Origin` header (assumed from its being a server-side client; untested), GitHub CI passing.

@@ -116,6 +116,17 @@ paths:
                 unauthorized:
                   value:
                     error: unauthorized
+        '403':
+          description: >-
+            Authenticated request rejected by the MCP SDK's DNS-rebinding
+            protections before any MCP processing: the `Host` is not
+            `mcp.firstsun.org` (or a localhost development name), or the
+            request carries any `Origin` header. Browser clients are not
+            supported; server-to-server clients send no `Origin`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpProtocolMessage'
         '503':
           description: >-
             The Worker cannot validate Access assertions and fails closed

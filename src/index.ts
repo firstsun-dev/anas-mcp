@@ -1,7 +1,16 @@
 import { createMcpHandler } from "agents/mcp/server";
+import { localhostAllowedHostnames } from "@modelcontextprotocol/server";
 import type { JWTVerifyGetKey } from "jose";
 import { authUnavailableResponse, unauthorizedResponse, verifyAccessAssertion } from "./auth/cloudflare-access";
 import { createServer } from "./server";
+
+/**
+ * The only public hostname `/mcp` serves. The SDK validates `Host` only for localhost and `workers.dev` endpoints and
+ * "relies on Cloudflare routing" for custom domains, so an authenticated request for any other Host that happened to
+ * reach the Worker would otherwise be served. Localhost names are kept for `wrangler dev` and tests.
+ */
+export const MCP_PUBLIC_HOSTNAME = "mcp.firstsun.org";
+const MCP_ALLOWED_HOSTNAMES = [MCP_PUBLIC_HOSTNAME, ...localhostAllowedHostnames()];
 
 export interface Env {
   /** Read-only Hyperdrive binding to the windmill_pipeline PostgreSQL database (schema blog_analytics). */
@@ -35,7 +44,14 @@ export function createHandler(getKey?: JWTVerifyGetKey): ExportedHandler<Env> {
         return access.kind === "unauthorized" ? unauthorizedResponse() : authUnavailableResponse();
       }
 
-      return createMcpHandler(() => createServer(env), { route: "/mcp" })(request, env, ctx);
+      // Origin: browser clients are not supported (ChatGPT and Service Token callers are server-to-server and send no
+      // Origin, which the SDK still accepts). An empty allowlist rejects every present Origin, including the SDK's
+      // default localhost-class origins. No wildcard Host/Origin is ever configured.
+      return createMcpHandler(() => createServer(env), {
+        route: "/mcp",
+        allowedHostnames: MCP_ALLOWED_HOSTNAMES,
+        allowedOriginHostnames: [],
+      })(request, env, ctx);
     },
   };
 }

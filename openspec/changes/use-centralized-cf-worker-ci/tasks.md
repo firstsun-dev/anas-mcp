@@ -16,6 +16,13 @@
 - [ ] Configure project build/check/test commands after package-manager compatibility is resolved.
 - [ ] Configure production/dev application URLs only after the Cloudflare routes are provisioned.
 
+## Interim PR verification gate (exception)
+- [x] Determine why PR #10 had no checks: no workflow existed (0 Actions runs).
+- [x] Inspect `_cf-worker-template.yml@v1`: PR events are test-only, but its setup action runs `pnpm install --frozen-lockfile` (no pnpm lockfile here, `install` input not exposed) and non-PR pushes deploy, with non-`main` branches using `--env dev`, which this repository does not define (Wrangler only warns and falls back to the production script).
+- [x] Add `.github/workflows/pr-verify.yml`: `pull_request` only, `contents: read`, no secrets, GitHub-hosted runner, `npm ci`, `npm run check`, `wrangler deploy --dry-run`; guarded by `tests/repo-guardrails.test.ts`.
+- [ ] Observe the first GitHub run of `pr-verify.yml` and record its result.
+- [ ] Propose to `firstsun-dev/.github`: npm/install pass-through and a test-only mode; define `env.dev` here; then replace `pr-verify.yml` with the thin caller.
+
 ## Deployment credentials
 - [ ] Provision least-privilege `CLOUDFLARE_API_TOKEN` for the shared deployment pipeline.
 - [ ] Configure `CLOUDFLARE_ACCOUNT_ID` in the protected GitHub Actions secret/configuration mechanism expected by the reusable workflow.
@@ -32,3 +39,5 @@
 ## Verification evidence
 
 On 2026-09-08 the central reusable workflow `firstsun-dev/.github/.github/workflows/_cf-worker-template.yml` was inspected and confirmed to provide the organization-managed Cloudflare Worker pipeline contract. Existing Firstsun repositories also consume it through reusable-workflow callers. No `anas-mcp` production workflow or deployment was created by this documentation change because package-manager compatibility, versioning, URLs, and production resources are not yet resolved.
+
+2026-10-14: documented exception. The shared template cannot be consumed yet (see tasks above and `docs/cicd.md`), so a test-only `pr-verify.yml` was added. It copies no deployment, version-upload, rollback or credential logic. Wiring the shared template with a branch-push trigger before `env.dev` exists would deploy feature branches to the production Worker name; do not do that.

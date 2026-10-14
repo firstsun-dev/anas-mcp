@@ -45,6 +45,26 @@ describe("repository guardrails", () => {
     expect(config.workers_dev).toBe(false);
     expect(config.preview_urls).toBe(false);
   });
+  it("never configures wildcard Host or Origin acceptance for the MCP handler", () => {
+    const code = stripComments(read("src/index.ts"));
+    expect(code).toMatch(/allowedOriginHostnames:\s*\[\]/);
+    expect(code).toMatch(/allowedHostnames:\s*MCP_ALLOWED_HOSTNAMES/);
+    expect(code).not.toMatch(/allowed(Origin)?Hostnames:\s*"\*"/);
+    expect(code).not.toMatch(/MCP_PUBLIC_HOSTNAME\s*=\s*"[^"]*\*/);
+  });
+  it("the PR verification workflow cannot deploy: pull_request only, read-only, no secrets, dry-run wrangler, hosted runner", () => {
+    const wf = read(".github/workflows/pr-verify.yml");
+    const code = wf.replace(/^\s*#.*$/gm, "");
+    expect(code).toMatch(/^on:\s*\n\s+pull_request:\s*$/m);
+    expect(code).not.toMatch(/^\s+(push|workflow_dispatch|schedule|pull_request_target|workflow_run):/m);
+    expect(code).toMatch(/permissions:\s*\n\s+contents: read\s*\n/);
+    expect(code).not.toMatch(/\bsecrets\b|CLOUDFLARE_|id-token|contents: write|uses:\s*firstsun-dev\//);
+    expect(code).not.toMatch(/wrangler (deploy(?! --dry-run)|versions|rollback|secret)/);
+    expect(code).toMatch(/npm ci/);
+    expect(code).toMatch(/npm run check/);
+    expect(code).toMatch(/wrangler deploy --dry-run/);
+    expect(code).toMatch(/runs-on:\s*ubuntu-latest/);
+  });
   it("the transitional Worker-local API key is fully removed (Access JWT is the only production gate)", () => {
     expect(sourceFiles("src")).not.toContain("src/auth/mcp-api-key.ts");
     const code = stripComments(allSource() + read("wrangler.jsonc"));

@@ -115,6 +115,33 @@ If OpenAPI validation becomes a standard requirement across Firstsun services, p
 
 Do not downgrade `openapi.yaml` to an older OpenAPI version merely because an outdated CI tool cannot parse 3.2. Update the validator/toolchain or make an explicit reviewed compatibility decision.
 
+## Pull request verification gate (interim, test-only)
+
+`.github/workflows/pr-verify.yml` runs on `pull_request` only and runs `npm ci`, `npm run check` (TypeScript, Vitest including the security/regression tests, `redocly lint openapi.yaml` for OpenAPI 3.2) and `npx wrangler deploy --dry-run`. It cannot deploy: no push/dispatch trigger, `permissions: contents: read`, no secrets, no Cloudflare credentials, no call to the shared template. `tests/repo-guardrails.test.ts` fails if any of that changes. It runs on a GitHub-hosted runner because this repository is public and PR code must not run on the organization's self-hosted runners.
+
+### Why PR #10 had no checks
+
+The repository has no `.github/workflows` directory, and the Actions API reports zero runs ever. Nothing was configured to produce a check; this was not a failure of the shared template.
+
+### Why the shared template cannot be used yet (verified against `_cf-worker-template.yml@v1`, commit `aeaab4c`)
+
+1. **npm incompatibility.** Every job runs `firstsun-dev/.github/actions/setup@v1`, whose `Install dependencies` step is `pnpm install --frozen-lockfile`. The template does not expose the action's `install` input. This repository has only `package-lock.json`, so even a test-only PR run would fail at setup. The deploy job also calls `pnpm exec wrangler`.
+2. **Unsafe branch deploys.** On any non-PR event the template deploys: `main` to production, every other branch to `--env dev`. This repository defines no `env.dev`. `npx wrangler deploy --dry-run --env dev` was run locally and only prints `No environment found in configuration with name "dev"`; it does not fail, and falls back to the top-level config, whose Worker name is the production script. Wiring the template with a `push: branches: ['**']` trigger (as the example above shows) would therefore deploy feature-branch pushes to production.
+3. **The template's PR behavior is safe**: for `pull_request` the migrate and deploy jobs are skipped by `github.event_name != 'pull_request'`, and the test jobs use no Cloudflare secrets. Its jobs default to runner label `linux`; the organization's self-hosted runners carry the `Linux` label, so PR code from a public repository would run on them.
+4. Only `test_unit_cmd`/`test_integration_cmd`/`test_e2e_cmd` jobs run on PRs; `build_cmd` is only used on deploy.
+
+### Smallest compatible path (proposal, not implemented here)
+
+Do not fork the deploy logic. Instead:
+
+1. In `firstsun-dev/.github`: let `_cf-worker-template.yml` pass an install command or `install: false` through to the setup action, and use `npm`/`pnpm exec` according to the lockfile present; add a test-only mode (or require callers to be PR-only) that never reaches deploy.
+2. In this repository: define `env.dev` (or a dedicated dev Worker name) in `wrangler.jsonc` so a non-`main` deploy can never resolve to the production script, and decide `app_version`, URLs and credentials.
+3. Only then replace `pr-verify.yml` with the thin caller, restricted to the events the team accepts.
+
+Until then, `pr-verify.yml` is a documented exception under the Change policy below (see `openspec/changes/use-centralized-cf-worker-ci/`). It contains no deployment, rollback or Cloudflare logic. Deployment remains manual and unautomated.
+
+**Not verified:** the workflow has not run on GitHub yet when this was written; its first result is recorded in the PR, not claimed here. Branch protection / required-check settings are not configured by this repository.
+
 ## Secrets and deployment credentials
 
 Application runtime credentials continue to follow `docs/credentials.md` and are Secrets Store first.
@@ -154,7 +181,7 @@ Once Cloudflare Access is in front of `/mcp` (`docs/cloudflare-access.md`), post
 - the Worker rejects a request with no/invalid `Cf-Access-Jwt-Assertion` (covered by unit tests; do not bypass Access to test it in production)
 - `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` are non-empty in the deployed Worker (empty values make `/mcp` return `503`)
 
-This repository currently has no caller workflow, so nothing deploys from `main` yet. Once one is added, rollout ordering in `docs/cloudflare-access.md` applies.
+This repository currently has no deployment workflow (only the test-only `pr-verify.yml`), so nothing deploys from `main` yet. Once one is added, rollout ordering in `docs/cloudflare-access.md` applies.
 
 Do not put reusable auth test implementation into the caller workflow if it can be generalized in `firstsun-dev/.github`.
 
