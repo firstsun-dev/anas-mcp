@@ -59,6 +59,15 @@
 
 ## Verification evidence
 
+2026-10-14 (PR #10 OAuth metadata URL fix, read-only production verification from the operator workstation):
+- `GET https://mcp.firstsun.org/health` -> 200 `{"service":"anas-mcp","status":"ok"}`.
+- `GET https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp` -> 200; `resource=https://mcp.firstsun.org/mcp`, `authorization_servers=["https://firstsun.cloudflareaccess.com"]`.
+- `GET https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server` -> 200; `issuer=https://firstsun.cloudflareaccess.com`, has `authorization_endpoint`, `token_endpoint`, `registration_endpoint`, `response_types_supported=["code"]`, `code_challenge_methods_supported=["S256"]`.
+- `GET https://mcp.firstsun.org/.well-known/oauth-authorization-server` -> 401 `{"error":"unauthorized"}`: not an authorization server metadata endpoint, so the earlier `oauth2MetadataUrl` was wrong. (This does not mean the OAuth flow is broken: clients discover the server via the RFC 9728 protected-resource metadata.)
+- Fix: `oauth2MetadataUrl` is now `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server` (still `type: oauth2`, `flows: {}`, no fabricated authorization/token URLs). `docs/api.md`, `docs/mcp-authentication.md` (discovery chain), `docs/cloudflare-access.md` and `tests/openapi-contract.test.ts` (incl. mocked RFC 9728 -> RFC 8414 chain) updated. No Worker runtime code, wrangler config, Access/Terraform change.
+- Earlier entries below that cite `https://mcp.firstsun.org/.well-known/oauth-authorization-server` are superseded by this entry.
+- STILL NOT VERIFIED: OAuth login (ChatGPT/Inspector), Service Token call, both modes concurrently, Worker check against a real Access JWT.
+
 2026-10-07: OpenSpec-only architecture update. The currently merged PR #8 still implements Worker-local API-key authentication and is transitional. Cloudflare Access configuration, Worker JWT validation, removal of `ANAS_MCP_API_KEY`, and dual-mode E2E remain pending.
 
 2026-10-14 (PR #10 third review follow-up, branch `feat/dual-access-auth`):

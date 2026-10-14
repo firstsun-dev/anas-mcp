@@ -51,7 +51,22 @@ Both are identifiers, not credentials. They are empty in source until the Access
 
 Point the client at `https://mcp.firstsun.org/mcp`. OAuth discovery, dynamic client registration, authorization, and tokens are served by Cloudflare Access; the user logs in with the approved identity provider. The Worker implements no OAuth endpoints and stores no OAuth state.
 
-`openapi.yaml`'s `CloudflareAccessOAuth` security scheme (`type: oauth2`, `oauth2MetadataUrl`) documents *that this discovery flow exists and where its metadata document is*; it is a static contract describing the shape of the flow, not a substitute for actually exercising it. Whether `https://mcp.firstsun.org/.well-known/oauth-authorization-server` resolves, what it returns, and whether ChatGPT (or any other OAuth client) can actually complete the flow against the real deployed Access application are runtime facts that can only be confirmed once infra-config's Terraform has been applied and the application exists — see the outstanding E2E gates in `docs/cloudflare-access.md` and `openspec/changes/support-dual-access-auth/tasks.md`. Nothing in this repository claims that discovery URL has been verified live.
+#### Discovery chain (RFC 9728 → RFC 8414)
+
+| Role | URL |
+|---|---|
+| MCP Resource Server | `https://mcp.firstsun.org/mcp` |
+| OAuth Protected Resource Metadata (RFC 9728) | `https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp` |
+| OAuth Authorization Server | `https://firstsun.cloudflareaccess.com` |
+| OAuth Authorization Server Metadata (RFC 8414) | `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server` |
+
+1. The client sends an unauthenticated `POST /mcp`; Access answers `401` with `WWW-Authenticate: Bearer ... resource_metadata="<protected-resource metadata URL>"`.
+2. The client fetches the protected-resource metadata, which names `authorization_servers: ["https://firstsun.cloudflareaccess.com"]`.
+3. The client fetches that server's RFC 8414 metadata and reads `authorization_endpoint`, `token_endpoint`, `registration_endpoint` and `code_challenge_methods_supported` (`S256`), then registers, authorizes (PKCE) and obtains a token.
+
+`https://mcp.firstsun.org/.well-known/oauth-authorization-server` is **not** part of this chain: the resource host is not the authorization server and that path returns `401 {"error":"unauthorized"}`. Clients that follow the protected-resource metadata are unaffected; only a client that guesses that path on the resource host would miss discovery.
+
+`openapi.yaml`'s `CloudflareAccessOAuth` security scheme (`type: oauth2`, `oauth2MetadataUrl` = the authorization server metadata URL above, `flows: {}`) documents that this discovery exists and where the RFC 8414 document is; authorization/token URLs are deliberately not hard-coded. It is a static contract, not proof that a real OAuth client (ChatGPT, MCP Inspector) completes the login; that end-to-end test is still outstanding (see `docs/cloudflare-access.md` and `openspec/changes/support-dual-access-auth/tasks.md`).
 
 ### Mode B: Service Token
 

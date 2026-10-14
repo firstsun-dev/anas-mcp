@@ -7,6 +7,11 @@ const spec = parse(readFileSync(new URL("../openapi.yaml", import.meta.url), "ut
   paths: { "/mcp": { post: { security: Record<string, unknown>[] } } };
 };
 
+const RESOURCE = "https://mcp.firstsun.org/mcp";
+const PRM_URL = "https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp";
+const AS_ISSUER = "https://firstsun.cloudflareaccess.com";
+const AS_METADATA_URL = `${AS_ISSUER}/.well-known/oauth-authorization-server`;
+
 describe("openapi.yaml Cloudflare Access OAuth security scheme", () => {
   const oauth = spec.components.securitySchemes.CloudflareAccessOAuth;
 
@@ -17,7 +22,7 @@ describe("openapi.yaml Cloudflare Access OAuth security scheme", () => {
     // full OpenID Connect Discovery document, and Cloudflare Access's Managed OAuth for MCP is plain OAuth 2.0
     // metadata (RFC 8414 + RFC 9728), not OIDC.
     expect(oauth.type).toBe("oauth2");
-    expect(oauth.oauth2MetadataUrl).toBe("https://mcp.firstsun.org/.well-known/oauth-authorization-server");
+    expect(oauth.oauth2MetadataUrl).toBe(AS_METADATA_URL);
     expect(oauth).not.toHaveProperty("openIdConnectUrl");
   });
 
@@ -50,5 +55,55 @@ describe("openapi.yaml Cloudflare Access OAuth security scheme", () => {
       CloudflareAccessServiceTokenId: [],
       CloudflareAccessServiceTokenSecret: [],
     });
+  });
+});
+
+describe("OAuth discovery chain (RFC 9728 -> RFC 8414), mocked responses", () => {
+  const oauth = spec.components.securitySchemes.CloudflareAccessOAuth;
+
+  // Shapes copied from read-only production responses (2026-10-14); no network access in tests.
+  const responses: Record<string, unknown> = {
+    [PRM_URL]: { resource: RESOURCE, authorization_servers: [AS_ISSUER] },
+    [AS_METADATA_URL]: {
+      issuer: AS_ISSUER,
+      authorization_endpoint: `${AS_ISSUER}/cdn-cgi/access/oauth/authorization`,
+      token_endpoint: `${AS_ISSUER}/cdn-cgi/access/oauth/token`,
+      registration_endpoint: `${AS_ISSUER}/cdn-cgi/access/oauth/registration`,
+      response_types_supported: ["code"],
+      code_challenge_methods_supported: ["S256"],
+    },
+  };
+  const fetchMock = async (url: string) => {
+    if (!(url in responses)) throw new Error(`unexpected fetch ${url}`);
+    return responses[url] as Record<string, any>;
+  };
+
+  it("the advertised authorization server's RFC 8414 URL equals openapi oauth2MetadataUrl", async () => {
+    const prm = await fetchMock(PRM_URL);
+    expect(prm.resource).toBe(RESOURCE);
+    expect(prm.authorization_servers).toHaveLength(1);
+    const metadataUrl = `${prm.authorization_servers[0]}/.well-known/oauth-authorization-server`;
+    expect(metadataUrl).toBe(oauth.oauth2MetadataUrl);
+    const as = await fetchMock(metadataUrl);
+    expect(as.issuer).toBe(prm.authorization_servers[0]);
+    expect(as.code_challenge_methods_supported).toContain("S256");
+  });
+
+  it("does not use the MCP resource host or protected-resource URL as the authorization server", () => {
+    const url = new URL(String(oauth.oauth2MetadataUrl));
+    expect(url.host).not.toBe(new URL(RESOURCE).host);
+    expect(oauth.oauth2MetadataUrl).not.toBe(PRM_URL);
+    expect(String(oauth.oauth2MetadataUrl)).not.toContain("cloudflare-access-protected-resource");
+    expect(url.pathname).toBe("/.well-known/oauth-authorization-server");
+  });
+
+  it("Service Token security schemes are two required headers; OAuth and Service Token are alternatives", () => {
+    const schemes = spec.components.securitySchemes;
+    expect(schemes.CloudflareAccessServiceTokenId).toMatchObject({ type: "apiKey", in: "header", name: "CF-Access-Client-Id" });
+    expect(schemes.CloudflareAccessServiceTokenSecret).toMatchObject({ type: "apiKey", in: "header", name: "CF-Access-Client-Secret" });
+    const security = spec.paths["/mcp"].post.security;
+    expect(security).toHaveLength(2);
+    expect(Object.keys(security[0])).toEqual(["CloudflareAccessOAuth"]);
+    expect(Object.keys(security[1]).sort()).toEqual(["CloudflareAccessServiceTokenId", "CloudflareAccessServiceTokenSecret"]);
   });
 });

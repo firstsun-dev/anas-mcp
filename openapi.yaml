@@ -153,17 +153,23 @@ components:
   securitySchemes:
     CloudflareAccessOAuth:
       type: oauth2
-      oauth2MetadataUrl: https://mcp.firstsun.org/.well-known/oauth-authorization-server
+      oauth2MetadataUrl: https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server
       flows: {}
       description: |
         Mode A. Cloudflare Access "Managed OAuth" for MCP servers (authorization
         code + PKCE). Cloudflare Access, not this Worker, serves the actual
         `authorization_endpoint` and `token_endpoint`. Per Cloudflare's own
         documentation these are NOT fixed, published endpoints: a client MUST
-        fetch OAuth 2.0 Authorization Server Metadata (RFC 8414, combined with
-        RFC 9728 protected-resource metadata) from `oauth2MetadataUrl` above
-        first, then use the `authorization_endpoint` / `token_endpoint` values
-        it returns. See
+        discover them. Discovery sequence: (1) an unauthenticated `POST /mcp`
+        returns `401` whose `WWW-Authenticate` carries `resource_metadata=
+        "https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp"`
+        (RFC 9728); that document lists `authorization_servers:
+        ["https://firstsun.cloudflareaccess.com"]`; (2) the client fetches that
+        issuer's RFC 8414 metadata, which is `oauth2MetadataUrl` above, and uses
+        the `authorization_endpoint` / `token_endpoint` / `registration_endpoint`
+        values it returns. The authorization server is the Access team domain,
+        NOT the MCP resource host: `mcp.firstsun.org/.well-known/oauth-authorization-server`
+        is not an authorization server metadata endpoint (it returns 401). See
         https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/.
 
         `oauth2MetadataUrl` (OpenAPI 3.2, OAS §4.27.1, "OAuth2 Security Scheme

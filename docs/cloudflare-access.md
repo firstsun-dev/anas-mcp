@@ -2,6 +2,9 @@
 
 Production `/mcp` is protected by one Cloudflare Access application that concurrently accepts **Mode A, Managed OAuth** and **Mode B, Access Service Token**. See `docs/mcp-authentication.md` for Worker behavior and client setup, and `openspec/changes/support-dual-access-auth/` for the decision.
 
+
+> **OAuth discovery URLs.** Resource server `https://mcp.firstsun.org/mcp`; protected-resource metadata (RFC 9728) `https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp`; authorization server `https://firstsun.cloudflareaccess.com`; its metadata (RFC 8414) `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server`. See `docs/mcp-authentication.md#discovery-chain-rfc-9728--rfc-8414`.
+
 ## Ownership
 
 | Concern | Owner |
