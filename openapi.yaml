@@ -117,7 +117,15 @@ paths:
                   value:
                     error: unauthorized
         '503':
-          description: The Worker cannot validate Access assertions because its non-secret Access configuration is missing; it fails closed before any MCP processing.
+          description: >-
+            The Worker cannot validate Access assertions and fails closed
+            before any MCP processing. Either its non-secret Access
+            configuration (`ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`) is missing or
+            invalid, or the Cloudflare Access JWKS (signing key document)
+            could not be fetched (network error, timeout, non-200, or
+            malformed response). Both are infrastructure/availability
+            failures, not proof that the caller's assertion is invalid, so
+            they are never reported as `401`.
           content:
             application/json:
               schema:
@@ -133,29 +141,32 @@ paths:
 components:
   securitySchemes:
     CloudflareAccessOAuth:
-      type: oauth2
+      type: openIdConnect
+      openIdConnectUrl: https://mcp.firstsun.org/.well-known/oauth-authorization-server
       description: |
         Mode A. Cloudflare Access "Managed OAuth" for MCP servers (authorization
         code + PKCE). Cloudflare Access, not this Worker, serves the actual
-        `authorization_endpoint` and `token_endpoint`, and they are not fixed
-        values this contract can hard-code: a client MUST first fetch OAuth
-        Authorization Server Metadata (RFC 8414 / RFC 9728) from
-
-          GET https://mcp.firstsun.org/.well-known/oauth-authorization-server
-
-        and use the `authorization_endpoint` / `token_endpoint` returned there.
-        The `authorizationUrl` / `tokenUrl` below point at that discovery
-        document rather than at a literal authorize/token endpoint, because the
-        OpenAPI oauth2 flow object requires fixed URLs and Access does not
-        publish fixed ones for this flow. See
+        `authorization_endpoint` and `token_endpoint`. Per Cloudflare's own
+        documentation these are NOT fixed, published endpoints: a client MUST
+        fetch OAuth Authorization Server Metadata (RFC 8414, combined with RFC
+        9728 protected-resource metadata) from `openIdConnectUrl` above first,
+        then use the `authorization_endpoint` / `token_endpoint` values it
+        returns. See
         https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/.
+
+        `openIdConnect` (rather than `oauth2`) is used deliberately: OpenAPI's
+        `oauth2` security scheme requires a hard-coded `authorizationUrl` and
+        `tokenUrl` in the flow object, and Access does not publish fixed values
+        for either, so stating any single URL for both (or for either) would be
+        false. `openIdConnect` only requires a discovery URL and is the closest
+        honest fit in OpenAPI's vocabulary for "the real endpoints are behind
+        one discovery document" -- note this is a deliberate approximation:
+        the discovery document is RFC 8414/9728 metadata, not a full OpenID
+        Connect Discovery document (no ID tokens, no `/userinfo`), even though
+        its JSON shape is compatible and OpenAPI's `openIdConnect` tooling can
+        still resolve `authorization_endpoint`/`token_endpoint` from it.
         Dynamic client registration, consent, and token issuance are owned by
         Cloudflare Access and are not implemented by this Worker.
-      flows:
-        authorizationCode:
-          authorizationUrl: https://mcp.firstsun.org/.well-known/oauth-authorization-server
-          tokenUrl: https://mcp.firstsun.org/.well-known/oauth-authorization-server
-          scopes: {}
     CloudflareAccessServiceTokenId:
       type: apiKey
       in: header

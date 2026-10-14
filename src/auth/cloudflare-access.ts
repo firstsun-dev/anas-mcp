@@ -9,7 +9,7 @@
  * The assertion, JWKS material, and expected AUD must never be logged or echoed in a response.
  */
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
-import { JOSEError, JWKSTimeout } from "jose/errors";
+import { JOSEError, JWKSInvalid, JWKSTimeout } from "jose/errors";
 
 export const ACCESS_ASSERTION_HEADER = "cf-access-jwt-assertion";
 
@@ -76,14 +76,19 @@ export async function verifyAccessAssertion(
     // Only jose's stable error code is surfaced; never the token, claims, or key material.
     const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "verification_failed";
 
-    // `createRemoteJWKSet`'s key getter throws when the JWKS itself could not be fetched (network error, non-200,
-    // bad JSON, or a timeout) rather than when the token/claims are invalid. That is a service-availability
-    // problem, not proof the caller is unauthorized, so it fails closed as 503 instead of a misleading 401.
-    // `JWKSNoMatchingKey` (wrong/unknown `kid` in an otherwise-fetched JWKS) and `JWKSMultipleMatchingKeys` are
-    // deliberately NOT included here: the JWKS fetch succeeded, so an unrecognized key is a verification failure
-    // (unauthorized), not an availability failure.
+    // `createRemoteJWKSet`'s key getter throws when the JWKS itself could not be fetched or was unusable (network
+    // error, non-200, bad JSON, a timeout, or a structurally malformed key document) rather than when the
+    // token/claims are invalid. That is a service-availability/provider-infrastructure problem, not proof the
+    // caller is unauthorized, so it fails closed as 503 instead of a misleading 401.
+    // `JWKSNoMatchingKey` (wrong/unknown `kid` in an otherwise well-formed, successfully fetched JWKS) and
+    // `JWKSMultipleMatchingKeys` are deliberately NOT included here: the JWKS fetch succeeded and was usable, so
+    // an unrecognized/ambiguous key is a verification failure about THIS token (unauthorized), not an
+    // availability failure. Likewise, JWS/JWT structure and claim errors on the caller's own assertion (bad
+    // signature, wrong alg, expired, wrong iss/aud, malformed token) are never reclassified as 503 here: only
+    // errors coming from resolving/validating the remote key material itself count as "unavailable".
     const isJwksUnavailable =
-      error instanceof JWKSTimeout || // request timed out
+      error instanceof JWKSTimeout || // JWKS request timed out
+      error instanceof JWKSInvalid || // JWKS fetched, but the document itself is structurally malformed
       (error instanceof JOSEError && error.code === "ERR_JOSE_GENERIC") || // generic fetch/non-200/JSON-parse failure
       !(error instanceof JOSEError); // raw network error (DNS, TLS, fetch rejection) not wrapped by jose
     if (isJwksUnavailable) {

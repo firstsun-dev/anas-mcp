@@ -39,8 +39,8 @@ Verified 2026-10-07: this repository has **no** `.github/workflows` caller, no G
 
 **If a caller workflow is added before this rolls out, `main` pushes will deploy to production** (`docs/cicd.md` branch behavior). Then merge ordering becomes a deployment ordering and the steps below must be followed strictly.
 
-1. Merge/apply nothing until both PRs (`anas-mcp` PR for issue #9 and the `infra-config` PR for issue #59) are reviewed.
-2. Operator runs the reviewed infra-config `terraform apply`. It attaches `mcp.firstsun.org` and creates the Access application. The currently deployed Worker is untouched.
+1. Merge/apply nothing until both PRs (`anas-mcp` PR #10 for issue #9 and `infra-config` PR #68 for issue #59) are reviewed. **Status as of 2026-10-13: `infra-config` PR #68 is merged to its default branch.** A merged Terraform PR is source code landing on the branch Terraform reads from; it is not proof that `terraform apply` has actually run against the real Cloudflare account. Treat the Access application, `mcp.firstsun.org` attachment, and the `anas_mcp_access_team_domain`/`anas_mcp_access_aud` outputs as **not yet confirmed live** until the operator verifies the apply from the infra-config repository/state, independent of this repository's merge status.
+2. Operator runs (or confirms having already run) the reviewed infra-config `terraform apply`. It attaches `mcp.firstsun.org` and creates the Access application. The currently deployed Worker is untouched.
 3. Read `anas_mcp_access_team_domain` and `anas_mcp_access_aud` from the Terraform outputs and set them in `wrangler.jsonc` `vars` (do not deploy with empty values: `/mcp` returns `503`).
 4. Merge the Worker PR and deploy the new Worker (assertion required, API key gone) as part of the same rollout window.
 5. Immediately verify both modes (matrix below). Roll back by redeploying the previous Worker version, or reverting and redeploying, if either mode is blocked.

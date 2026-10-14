@@ -1,4 +1,4 @@
-import { JWKSInvalid, JWKSNoMatchingKey, JWKSTimeout } from "jose/errors";
+import { JOSEError, JWKSInvalid, JWKSNoMatchingKey, JWKSTimeout } from "jose/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHandler, type Env } from "../src/index";
 import { verifyAccessAssertion } from "../src/auth/cloudflare-access";
@@ -118,7 +118,13 @@ describe("/mcp Cloudflare Access assertion validation", () => {
   });
   it("fails closed with a generic 503, not 401, when the Access JWKS cannot be fetched (outage/timeout)", async () => {
     const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
-    for (const thrown of [new JWKSTimeout(), new TypeError("fetch failed"), new DOMException("The operation was aborted.", "AbortError")]) {
+    for (const thrown of [
+      new JWKSTimeout(),
+      new TypeError("fetch failed"),
+      new DOMException("The operation was aborted.", "AbortError"),
+      new JWKSInvalid("JSON Web Key Set malformed"),
+      new JOSEError("Expected 200 OK from the JSON Web Key Set HTTP response"),
+    ]) {
       const flaky = createHandler(async () => {
         throw thrown;
       });
@@ -195,11 +201,15 @@ describe("verifyAccessAssertion", () => {
     });
     expect(r).toMatchObject({ ok: false, kind: "unauthorized" });
   });
-  it("classifies a malformed JWKS document as unauthorized (the fetch itself did not fail)", async () => {
+  it("classifies a structurally malformed remote JWKS document as unavailable, not unauthorized", async () => {
+    // The JWKS fetch succeeded (we got a response), but the document itself is not a usable JWK Set (e.g. no
+    // `keys` array, or a key that isn't actually public). That is a Cloudflare Access / provider-side key
+    // infrastructure defect, not evidence that the caller's assertion is invalid, so it must fail closed as a
+    // 503, never a misleading 401.
     const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
       throw new JWKSInvalid();
     });
-    expect(r).toMatchObject({ ok: false, kind: "unauthorized" });
+    expect(r).toMatchObject({ ok: false, kind: "unavailable" });
   });
   it("classifies a JWKS fetch timeout as unavailable (fail closed, not a 401)", async () => {
     const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
@@ -210,6 +220,14 @@ describe("verifyAccessAssertion", () => {
   it("classifies a network/DNS failure fetching the JWKS as unavailable", async () => {
     const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
       throw new TypeError("fetch failed");
+    });
+    expect(r).toMatchObject({ ok: false, kind: "unavailable" });
+  });
+  it("classifies an HTTP failure fetching the JWKS (non-200 response / bad JSON) as unavailable", async () => {
+    // This is the generic `JOSEError` jose's own `fetchJwks` throws directly for "Expected 200 OK" and
+    // "Failed to parse ... as JSON" -- distinct from any of its more specific subclasses, which must stay 401.
+    const r = await verifyAccessAssertion(req(await signAssertion()), config, async () => {
+      throw new JOSEError("Expected 200 OK from the JSON Web Key Set HTTP response");
     });
     expect(r).toMatchObject({ ok: false, kind: "unavailable" });
   });
