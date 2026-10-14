@@ -50,6 +50,8 @@ Both are identifiers, not credentials. They are empty in source until the Access
 
 Point the client at `https://mcp.firstsun.org/mcp`. OAuth discovery, dynamic client registration, authorization, and tokens are served by Cloudflare Access; the user logs in with the approved identity provider. The Worker implements no OAuth endpoints and stores no OAuth state.
 
+`openapi.yaml`'s `CloudflareAccessOAuth` security scheme (`type: oauth2`, `oauth2MetadataUrl`) documents *that this discovery flow exists and where its metadata document is*; it is a static contract describing the shape of the flow, not a substitute for actually exercising it. Whether `https://mcp.firstsun.org/.well-known/oauth-authorization-server` resolves, what it returns, and whether ChatGPT (or any other OAuth client) can actually complete the flow against the real deployed Access application are runtime facts that can only be confirmed once infra-config's Terraform has been applied and the application exists — see the outstanding E2E gates in `docs/cloudflare-access.md` and `openspec/changes/support-dual-access-auth/tasks.md`. Nothing in this repository claims that discovery URL has been verified live.
+
 ### Mode B: Service Token
 
 Send both headers on every request:

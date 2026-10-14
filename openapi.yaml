@@ -141,30 +141,35 @@ paths:
 components:
   securitySchemes:
     CloudflareAccessOAuth:
-      type: openIdConnect
-      openIdConnectUrl: https://mcp.firstsun.org/.well-known/oauth-authorization-server
+      type: oauth2
+      oauth2MetadataUrl: https://mcp.firstsun.org/.well-known/oauth-authorization-server
+      flows: {}
       description: |
         Mode A. Cloudflare Access "Managed OAuth" for MCP servers (authorization
         code + PKCE). Cloudflare Access, not this Worker, serves the actual
         `authorization_endpoint` and `token_endpoint`. Per Cloudflare's own
         documentation these are NOT fixed, published endpoints: a client MUST
-        fetch OAuth Authorization Server Metadata (RFC 8414, combined with RFC
-        9728 protected-resource metadata) from `openIdConnectUrl` above first,
-        then use the `authorization_endpoint` / `token_endpoint` values it
-        returns. See
+        fetch OAuth 2.0 Authorization Server Metadata (RFC 8414, combined with
+        RFC 9728 protected-resource metadata) from `oauth2MetadataUrl` above
+        first, then use the `authorization_endpoint` / `token_endpoint` values
+        it returns. See
         https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/.
 
-        `openIdConnect` (rather than `oauth2`) is used deliberately: OpenAPI's
-        `oauth2` security scheme requires a hard-coded `authorizationUrl` and
-        `tokenUrl` in the flow object, and Access does not publish fixed values
-        for either, so stating any single URL for both (or for either) would be
-        false. `openIdConnect` only requires a discovery URL and is the closest
-        honest fit in OpenAPI's vocabulary for "the real endpoints are behind
-        one discovery document" -- note this is a deliberate approximation:
-        the discovery document is RFC 8414/9728 metadata, not a full OpenID
-        Connect Discovery document (no ID tokens, no `/userinfo`), even though
-        its JSON shape is compatible and OpenAPI's `openIdConnect` tooling can
-        still resolve `authorization_endpoint`/`token_endpoint` from it.
+        `oauth2MetadataUrl` (OpenAPI 3.2, OAS §4.27.1, "OAuth2 Security Scheme
+        Support for RFC8414") is the field this specification defines for
+        exactly this situation: an OAuth 2.0 authorization server whose real
+        endpoints are discoverable, not fixed. `flows` is left as an empty
+        object (`{}`): the OpenAPI 3.2 schema requires the `flows` key to be
+        present for `type: oauth2`, but the `OAuth Flows Object` schema itself
+        has no required/minProperties constraint, so `{}` is schema-valid and
+        does not require fabricating an `authorizationCode`/`clientCredentials`
+        flow with hard-coded `authorizationUrl`/`tokenUrl` values that Access
+        does not publish and this contract cannot state truthfully.
+
+        Caveat: Swagger UI and other tooling that predates OpenAPI 3.2 or does
+        not yet implement `oauth2MetadataUrl`/RFC 8414 discovery will not be
+        able to drive this flow interactively from the empty `flows` object
+        alone; such tooling must be pointed at `oauth2MetadataUrl` directly.
         Dynamic client registration, consent, and token issuance are owned by
         Cloudflare Access and are not implemented by this Worker.
     CloudflareAccessServiceTokenId:
