@@ -29,7 +29,7 @@
   // the infra-config outputs `anas_mcp_access_team_domain` / `anas_mcp_access_aud` as part of the coordinated
   // rollout (see docs/cloudflare-access.md). These are not credentials; never put secrets in `vars`.
   "vars": {
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": ""
+    "ACCESS_TEAM_DOMAIN": "firstsun.cloudflareaccess.com",
+    "ACCESS_AUD": "1041a0fe23797ad6035a58c1f501544d853c8098bd5165c6b9c89174cad55327"
   }
 }
