@@ -140,7 +140,17 @@ Do not fork the deploy logic. Instead:
 
 Until then, `pr-verify.yml` is a documented exception under the Change policy below (see `openspec/changes/use-centralized-cf-worker-ci/`). It contains no deployment, rollback or Cloudflare logic. Deployment remains manual and unautomated.
 
-**Not verified:** the workflow has not run on GitHub yet when this was written; its first result is recorded in the PR, not claimed here. Branch protection / required-check settings are not configured by this repository.
+### Verified result
+
+| Item | Value |
+| --- | --- |
+| Run | [`PR Verify` 38527650533](https://github.com/firstsun-dev/anas-mcp/actions/runs/38527650533) |
+| Event / date | `pull_request`, 2026-10-14 (created 07:20 UTC) |
+| Commit | `17af13cc0dbee643ae05eb97669bd289a2a6f95a` |
+| Conclusion | success; check run `Verify (npm ci, typecheck, tests, OpenAPI, wrangler dry-run)` |
+| Steps that passed | `npm ci` (lockfile-exact), `npm run check` (typecheck, Vitest, `redocly lint`), `wrangler deploy --dry-run` |
+
+This proves only that the PR verification steps pass on a GitHub-hosted runner for that commit. It is **not** a deployment: the workflow has no Cloudflare credentials and uploads nothing, and no production deployment, Access provisioning or E2E has been performed. A later commit needs its own run; the result above is not carried over to it. Branch protection / required checks are not configured by this repository.
 
 ## Secrets and deployment credentials
 

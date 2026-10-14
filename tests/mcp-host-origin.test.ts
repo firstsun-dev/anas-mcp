@@ -91,9 +91,56 @@ describe("MCP Origin validation (no browser clients are supported)", () => {
     expect(res.headers.get("access-control-allow-credentials")).toBeNull();
   });
 
-  it("rejects an OPTIONS preflight from an unapproved origin", async () => {
-    const res = await call(PROD, { host: "mcp.firstsun.org", origin: "https://evil.example" }, { method: "OPTIONS", assertion: false });
-    expect([401, 403]).toContain(res.status);
+  it("rejects an authenticated request with a disallowed Origin on every method, by the SDK (403), not by auth", async () => {
+    for (const method of ["POST", "GET", "DELETE", "OPTIONS"]) {
+      pg.constructed = 0;
+      const res = await call(PROD, { host: "mcp.firstsun.org", origin: "https://evil.example" }, { method });
+      expect(res.status, method).toBe(403);
+      // The SDK's own JSON-RPC rejection, which proves authentication passed and Origin validation ran.
+      expect(await res.json(), method).toMatchObject({ jsonrpc: "2.0", error: { message: "Invalid Origin: evil.example" } });
+      expect(pg.constructed, method).toBe(0);
+    }
+  });
+
+  it("rejects an authenticated OPTIONS preflight with a disallowed Origin before the preflight is answered", async () => {
+    const res = await call(
+      PROD,
+      { host: "mcp.firstsun.org", origin: "https://evil.example", "access-control-request-method": "POST" },
+      { method: "OPTIONS" },
+    );
+    expect(res.status).toBe(403);
+    // The SDK still attaches its CORS headers to this 403, but a non-2xx preflight fails the browser's CORS check.
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects an UNauthenticated OPTIONS by the authentication layer (generic 401), not by Origin validation", async () => {
+    for (const origin of ["https://evil.example", undefined]) {
+      const headers: Record<string, string> = { host: "mcp.firstsun.org" };
+      if (origin) headers.origin = origin;
+      const res = await call(PROD, headers, { method: "OPTIONS", assertion: false });
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: "unauthorized" });
+      expect(pg.constructed).toBe(0);
+    }
+  });
+
+  it("answers an authenticated OPTIONS without Origin (non-browser) as a plain preflight, with no MCP or database work", async () => {
+    const res = await call(PROD, { host: "mcp.firstsun.org" }, { method: "OPTIONS" });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("");
+    expect(pg.constructed).toBe(0);
+  });
+
+  it("still serves a normal authenticated server-to-server MCP request with no Origin", async () => {
+    const res = await call(PROD, { host: "mcp.firstsun.org" });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("tools");
+  });
+
+  it("documents the SDK's default CORS headers on a served response (browser clients unsupported; Origin validation is the control)", async () => {
+    const res = await call(PROD, { host: "mcp.firstsun.org" });
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("access-control-allow-credentials")).toBeNull();
   });
 });
 

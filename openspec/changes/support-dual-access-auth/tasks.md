@@ -99,3 +99,5 @@
 - CI (P2): see `use-centralized-cf-worker-ci`. Added test-only `.github/workflows/pr-verify.yml`.
 - Results: see the PR description for the final `npm ci` / `npm run check` / `wrangler deploy --dry-run` output; GitHub-side CI status is only claimed once a run exists.
 - NOT done and NOT claimed: Terraform applied, Managed OAuth with ChatGPT, Service Token against the live endpoint, both modes concurrently in production, `workers.dev`/preview ingress actually restricted in production, ChatGPT sending no `Origin` header (assumed from its being a server-side client; untested), GitHub CI passing.
+
+2026-10-14 (PR #10 final review follow-up): `tests/mcp-host-origin.test.ts` now separates unauthenticated OPTIONS (generic 401 from the auth layer), authenticated OPTIONS/POST/GET/DELETE with a disallowed Origin (SDK 403 `Invalid Origin`, no `pg` construction) and authenticated no-Origin traffic (normal 200; OPTIONS empty 200), against the real installed SDK. Source behavior unchanged. SDK default `Access-Control-Allow-Origin: *` reviewed and intentionally left as is. Verified locally only; production E2E remains a separate release gate.
