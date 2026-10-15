@@ -12,7 +12,7 @@
 - The Worker-local `ANAS_MCP_API_KEY` Secrets Store gate from PR #8 is removed and must not return as a third mode. Never read or compare `Authorization`, `CF-Access-Client-Id`, or `CF-Access-Client-Secret` in the Worker, and never log or return `Authorization`, `Cf-Access-Jwt-Assertion`, `CF-Access-Client-*`, or any single-header Service Token header. Never substitute `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, provider/database credentials, or CI deployment tokens for MCP authentication.
 - Do not accept MCP credentials via query string, replace Access with OpenAI IP allowlisting or User-Agent checks, or add a Worker-side OAuth server, `@cloudflare/workers-oauth-provider`, `OAUTH_KV`, D1, Durable Objects, or PostgreSQL auth tables unless an accepted OpenSpec change supersedes the current decision.
 - Rollout is order-sensitive: the Worker requires an Access assertion, so apply Access (infra-config) and set `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` before deploying this Worker. See `docs/cloudflare-access.md`.
-- **Cloudflare Worker CI/CD is centralized in `firstsun-dev/.github`.** Production/development deploy logic must use the reusable workflow `firstsun-dev/.github/.github/workflows/_cf-worker-template.yml`; this repository may contain only a thin caller workflow with app-specific triggers and inputs. See `docs/cicd.md` and `openspec/changes/use-centralized-cf-worker-ci/`.
+- **Cloudflare Worker CI/CD is centralized in `firstsun-dev/.github`.** Production/development deploy logic must use the reusable workflow `firstsun-dev/.github/.github/workflows/_cf-worker-template.yml`; this repository may contain only a thin caller workflow with app-specific triggers and inputs (`cicd.yml`: push to `main` only, template pinned to a release tag; PRs are test-only via `pr-verify.yml`; no automatic rollback). See `docs/cicd.md` and `openspec/changes/use-centralized-cf-worker-ci/`.
 - Do not copy/fork `wrangler versions upload/deploy`, shared rollback logic, or generic Cloudflare pipeline steps into this repository to bypass the central workflow. Generic CI improvements belong in `firstsun-dev/.github`.
 - GA4 is queried through the Google Analytics Data API.
 - Google Search Console is queried through the Search Console API.
@@ -43,11 +43,11 @@
 Before claiming a code change is done, run:
 
 ```bash
-npm install
-npm run check
+pnpm install --frozen-lockfile
+pnpm run check
 ```
 
-For HTTP surface changes, also validate `openapi.yaml` with `npm run lint:openapi` (wired into `npm run check`; see `docs/api.md#validation`) and ensure Swagger-compatible rendering remains valid.
+For HTTP surface changes, also validate `openapi.yaml` with `pnpm run lint:openapi` (wired into `pnpm run check`; see `docs/api.md#validation`) and ensure Swagger-compatible rendering remains valid.
 
 For MCP behavior changes also run the Worker locally and validate `/mcp` using MCP Inspector. Production authentication is not verified until the deployed system has been tested through Cloudflare Access with Managed OAuth and a Service Token (concurrently), a blocked identity, and an invalid/revoked Service Token; ChatGPT compatibility must not be claimed unless actually tested from ChatGPT.
 

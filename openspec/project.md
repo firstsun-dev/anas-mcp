@@ -37,7 +37,7 @@ Cloudflare Worker CI/CD is centralized in **`firstsun-dev/.github`**.
 - `anas-mcp` SHALL NOT copy or fork the shared `wrangler versions upload/deploy`, generic branch routing, rollback, or organization-wide runner/setup implementation merely to customize deployment.
 - Generic Cloudflare pipeline improvements belong in `firstsun-dev/.github`; application-specific exceptions require an accepted OpenSpec change.
 - CI bootstrap credentials required to authenticate GitHub Actions to Cloudflare may use the protected GitHub Actions secret/configuration mechanism expected by the reusable workflow. Runtime provider credentials must not be copied into GitHub Actions solely for deployment.
-- Before enabling the caller workflow, verify package-manager compatibility: this repository currently uses npm scripts while the shared pipeline currently invokes `pnpm exec wrangler` internally.
+- The repository uses pnpm to match the shared pipeline (`pnpm install --frozen-lockfile`, `pnpm exec wrangler`); `cicd.yml` deploys on push to `main` only, pinned to a template release tag, with no automatic rollback.
 - Production deployment must not be claimed ready until the caller workflow, version input, build/check command, target URLs, and Cloudflare bootstrap credentials have been validated.
 
 This decision is specified in `openspec/changes/use-centralized-cf-worker-ci/` and `docs/cicd.md`.

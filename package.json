@@ -2,6 +2,7 @@
   "name": "anas-mcp",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.33.0",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -9,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint:openapi": "redocly lint openapi.yaml",
-    "check": "npm run typecheck && npm run test && npm run lint:openapi"
+    "check": "pnpm run typecheck && pnpm run test && pnpm run lint:openapi"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",

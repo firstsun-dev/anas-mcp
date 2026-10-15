@@ -73,19 +73,9 @@ Treat the reusable workflow as the source of truth; re-read its current contract
 
 ## Package-manager compatibility
 
-`anas-mcp` currently defines npm scripts and does not yet have an accepted pnpm migration decision.
+Decision (2026-10-15, issue #11): `anas-mcp` aligns to the organization's pnpm convention (`packageManager: pnpm@10.33.0`, committed `pnpm-lock.yaml`, `package-lock.json` removed). The central template is consumed unmodified at `@v1.5.0`; no deployment steps are copied locally.
 
-The central Cloudflare pipeline currently invokes `pnpm exec wrangler` during deployment. Before enabling the caller workflow, verify the current template with this repository's install/build strategy.
-
-Acceptable outcomes:
-
-1. prove npm-installed dependencies work with the central template;
-2. align `anas-mcp` to the organization's pnpm convention in a reviewed change; or
-3. improve the central reusable workflow to support the needed package-manager contract.
-
-Unacceptable outcome:
-
-- copy the central deployment shell steps locally just to avoid resolving the compatibility issue.
+Production deploys trigger on push to `main` only. Automatic revert is not used: the template's `verify_cmd` path reverts to the previous version, which may predate Cloudflare Access. A local read-only `smoke` job (`scripts/smoke-prod.sh`) fails the run instead and requires operator action. See `docs/cicd.md`.
 
 ## Credential boundary
 

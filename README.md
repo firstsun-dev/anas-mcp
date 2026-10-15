@@ -112,7 +112,7 @@ jobs:
 
 Do not copy the shared `wrangler versions upload/deploy`, rollback, or generic runner logic into this repository.
 
-The current project uses npm scripts while the central workflow currently invokes `pnpm exec wrangler` internally. Package-manager compatibility must be verified before the caller is enabled; if there is a mismatch, prefer aligning the project or improving the central workflow rather than forking deploy logic locally.
+The project uses pnpm (`packageManager` pinned, `pnpm-lock.yaml` committed) to match the central workflow. `.github/workflows/cicd.yml` calls the template pinned at `@v1.5.0` on pushes to `main` only; pull requests run the test-only `pr-verify.yml`. There is no automatic rollback; post-deploy smoke failures require operator action.
 
 See `docs/cicd.md` and `openspec/changes/use-centralized-cf-worker-ci/`.
 
@@ -134,8 +134,8 @@ Cloudflare Access rollout and E2E (ChatGPT OAuth, Service Token, concurrent use)
 ## Development
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 Health endpoint:
@@ -153,7 +153,7 @@ http://localhost:8787/mcp
 Test MCP locally with:
 
 ```bash
-npx @modelcontextprotocol/inspector@latest
+pnpm dlx @modelcontextprotocol/inspector@latest
 ```
 
 Locally, `/mcp` requires an Access assertion that only Cloudflare Access can mint, so the test suite signs assertions with a generated key (see `docs/mcp-authentication.md`). Do not add an auth bypass for development. Production authentication must be verified against the deployed Worker through Access.
@@ -161,7 +161,7 @@ Locally, `/mcp` requires an Access assertion that only Cloudflare Access can min
 ## Verification
 
 ```bash
-npm run check
+pnpm run check
 ```
 
 The final project check should also validate `openapi.yaml` with an OpenAPI 3.2-capable validator. Until that validator is actually wired in, OpenAPI automated validation remains pending.
@@ -170,7 +170,7 @@ For production auth, follow `docs/cloudflare-access.md` and verify Managed OAuth
 
 ## Deployment
 
-Do not make `npm run deploy` or locally copied Wrangler deployment commands the normal production CI path.
+Do not make `pnpm run deploy` or locally copied Wrangler deployment commands the normal production CI path.
 
 Production/development CI deployment must be invoked through the reusable workflow maintained by `firstsun-dev/.github`. The application repository should contain only the thin caller after package-manager compatibility, versioning, URLs, and Cloudflare bootstrap credentials have been resolved.
 
