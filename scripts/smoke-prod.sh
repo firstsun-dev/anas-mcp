@@ -17,14 +17,17 @@ failures=0
 fail() { echo "::error::SMOKE FAIL: $1"; failures=$((failures + 1)); }
 pass() { echo "ok: $1"; }
 
-# fetch <outfile> <curl args...> -> echoes the HTTP status; retries to ride out edge propagation.
+# fetch <outfile> <curl args...> -> echoes the HTTP status. Retries (at most ATTEMPTS requests) on transport failure
+# (DNS, connect, timeout: curl exits non-zero and reports 000) and on HTTP 5xx, to ride out edge propagation.
+# curl's exit status is handled separately from its HTTP status so a failure can never yield a malformed code.
 fetch() {
   local out="$1"; shift
   local code="000" i
   for ((i = 1; i <= ATTEMPTS; i++)); do
-    code="$(curl -sS -m 20 -o "$out" -w '%{http_code}' "$@" 2>/dev/null || echo 000)"
-    [[ "$code" != "000" && "$code" != 5?? ]] && break
-    sleep "$DELAY"
+    if ! code="$(curl -sS -m 20 -o "$out" -w '%{http_code}' "$@" 2>/dev/null)"; then code="000"; fi
+    [[ "$code" =~ ^[0-9]{3}$ ]] || code="000"
+    [[ "$code" == "000" || "$code" =~ ^5 ]] || break
+    ((i < ATTEMPTS)) && sleep "$DELAY"
   done
   echo "$code"
 }

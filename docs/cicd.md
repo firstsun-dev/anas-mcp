@@ -103,7 +103,7 @@ The template's `verify_cmd` path installs Playwright and, on failure, runs `wran
 3. `GET /.well-known/cloudflare-access-protected-resource/mcp` returns `200` with `resource == https://mcp.firstsun.org/mcp` and the Access issuer in `authorization_servers`.
 4. `GET <issuer>/.well-known/oauth-authorization-server` is reachable and its `issuer` equals `https://firstsun.cloudflareaccess.com` (the `ACCESS_TEAM_DOMAIN` in `wrangler.jsonc`; a test guards drift).
 
-Transient `5xx`/connection errors are retried (6 × 5 s). On failure the job fails the run with "OPERATOR INTERVENTION REQUIRED".
+Transport errors (DNS, connect, timeout) and HTTP `5xx` are retried up to 6 requests per check with a 5 s delay (bounded; curl's exit status is handled separately from its HTTP status). `tests/smoke-script.test.ts` exercises the script with a mock `curl` (DNS error, connection failure, timeout, `502` then `200`, persistent `503`, success, and rejection cases); it is skipped where `bash`/`jq` are missing. On failure the job fails the run with "OPERATOR INTERVENTION REQUIRED".
 
 **This design has NO automatic rollback.** A failed smoke test leaves the new version live. Operators must decide to roll forward or manually run `wrangler versions deploy <known-good-id>@100` after confirming that version has the Access gate. The smoke checks do not prove an authenticated MCP session works; that still requires an operator-held Access credential (Managed OAuth or Service Token) and is not performed in CI.
 
@@ -115,12 +115,55 @@ Transient `5xx`/connection errors are retried (6 × 5 s). On failure the job fai
 
 The repository uses **pnpm** (`packageManager: pnpm@10.33.0`, matching `blog`, `heaven-monorepo` and `innovation-apps`), with a committed `pnpm-lock.yaml` and `pnpm-workspace.yaml` (`allowBuilds`). `package-lock.json` is removed. The shared setup action runs `pnpm install --frozen-lockfile` and the template calls `pnpm exec wrangler`; both were exercised locally with pnpm 10.33.0 on Node 24 (the template's `NODE_VERSION`). The self-hosted runner image bakes in Node/pnpm (`setup-node`/`setup-pnpm: false`); its pnpm version cannot be inspected from here and is verified only by the first run on `main`.
 
-## Required GitHub configuration (not set by this repository)
+## Production release gates (status as of 2026-10-15)
 
-- Organization/repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, available to this repository (least privilege: Workers Scripts edit for the `anas-mcp` script only).
-- Self-hosted runner label `linux` must be available to this repository (runner group access).
-- GitHub environment `anas-mcp/prod` is referenced by the template's deploy job; GitHub creates it on first use. Add required reviewers there if a manual approval gate is wanted.
-- Branch protection on `main` requiring the PR Verify check.
+**Merging this PR is the first production deployment.** Because `cicd.yml` deploys every push to `main`, `main` must be gated before activation. This repository does not change GitHub or Cloudflare settings; the items below are operator actions.
+
+### Verified (read-only GitHub API, 2026-10-15)
+
+| Item | Observed |
+| --- | --- |
+| Repository visibility | public |
+| `main` branch protection | **none** (`protected: false`, protection API returns 404, no rulesets) |
+| Org secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | exist, but visibility is `private` (private repositories only) |
+| Org runner group `Default` | visible to all repositories, `allows_public_repositories: true`; 10 online runners labeled `self-hosted, Linux, X64, …` (label matching is case-insensitive, so the template's default `linux` matches) |
+| Repository environments | none exist yet (`anas-mcp/prod` is auto-created on first deploy) |
+| Repository-level secrets | none |
+
+### Outstanding operator prerequisites (blockers for activation)
+
+1. **Cloudflare secrets are not available to this repository.** The org secrets are scoped to private repositories and this repository is public, so `secrets: inherit` would pass empty values and the deploy would fail at Wrangler authentication. An org admin must either grant the secrets to `anas-mcp` (change visibility to `selected`) or add repository-level secrets. Use a least-privilege token (Workers Scripts edit for the `anas-mcp` script only). Do not paste credentials into the PR or repository files.
+2. **Protect `main`** before merging this PR:
+   - require a pull request before merging (no direct pushes), with at least 1 approving review;
+   - require the status check `Verify (pnpm install, typecheck, tests, OpenAPI, wrangler dry-run)` (workflow `PR Verify`) to pass, branch up to date;
+   - restrict who can push to `main` and block force-pushes and deletions; include administrators if policy allows.
+   A check only appears in the picker after it has run once, so the order is: PR Verify runs on this PR, then add protection, then merge.
+3. **Public repository + self-hosted runners.** Only `push` to `main` reaches the self-hosted pipeline, and with protection (item 2) only reviewed code lands there. Also set Settings, Actions, "Fork pull request workflows" to require approval for outside contributors; PR Verify itself uses GitHub-hosted runners.
+4. **Environment `anas-mcp/prod`:** created automatically on first deploy. Optionally pre-create it with required reviewers for a manual approval gate and restrict it to the `main` branch.
+5. **Cloudflare dashboard:** confirm `workers.dev` and Preview URLs are disabled and `mcp.firstsun.org` is attached (see Residual risk above).
+6. **Runner pnpm:** the pnpm version on the runner image cannot be inspected from here; the first run on `main` is the evidence.
+
+Do not mark activation complete until each item is confirmed by the operator.
+
+## Authenticated MCP acceptance check (separate from CI smoke; not yet executed)
+
+The credential-free smoke job proves ingress and discovery only. It does **not** prove an authorized client can use MCP. After the first production deployment, an operator must run this check manually with an approved Cloudflare Access Service Token held in the operator's secret store (never committed, never added to repository or PR workflows, never printed):
+
+```bash
+export CF_ACCESS_CLIENT_ID=...        # from the operator's secret store
+export CF_ACCESS_CLIENT_SECRET=...
+H=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+   -H 'content-type: application/json' -H 'accept: application/json, text/event-stream')
+URL=https://mcp.firstsun.org/mcp
+curl -sS "${H[@]}" $URL -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"acceptance","version":"0"}}}'
+curl -sS "${H[@]}" $URL -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+curl -sS "${H[@]}" $URL -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"bing_list_sites","arguments":{}}}'
+# Invalid credential: expect a non-2xx response and no tools in the body.
+curl -sS -i -H 'CF-Access-Client-Id: invalid.access' -H 'CF-Access-Client-Secret: invalid' \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' $URL -d '{"jsonrpc":"2.0","id":4,"method":"tools/list"}'
+```
+
+Acceptance criteria: `initialize` succeeds; `tools/list` returns the expected tools; `bing_list_sites` (read-only) returns a result or a documented `data_unavailable`, and no write-capable tool is exposed; the invalid credential is rejected without tool output. Record the date, deployed Worker version, and observed status codes in `openspec/changes/use-centralized-cf-worker-ci/tasks.md`. Until then, authenticated end-to-end behavior (including ChatGPT/OAuth) is **unverified**.
 
 ## Secrets and deployment credentials
 

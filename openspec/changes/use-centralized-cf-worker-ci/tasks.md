@@ -45,3 +45,12 @@ On 2026-09-08 the central reusable workflow `firstsun-dev/.github/.github/workfl
 2026-10-14: first `pr-verify.yml` run (38527650533, commit `17af13c`) succeeded. This is PR verification evidence only; it says nothing about deployment, which remains unconfigured and unverified (no deploy workflow, no Cloudflare credentials in CI).
 
 2026-10-15 (issue #11): verified `wrangler versions upload --dry-run --var COMMIT_HASH:… --var VERSION:…` (the template's exact arguments) preserves `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` and the `ANALYTICS_DB` Hyperdrive binding. Residual: `workers_dev:false`/`preview_urls:false` are not re-applied by `versions upload`; confirm in the dashboard. Pending until first `main` run: Cloudflare secrets/runner access, `anas-mcp/prod` environment, runner pnpm version, branch protection, and the unchecked items above (non-main dev deploy is intentionally not applicable; production deploy requires merge approval).
+
+2026-10-15 (re-review of PR #12): fixed `scripts/smoke-prod.sh` retry handling (`$(curl … || echo 000)` could yield `000000` and stop retries early). `tests/smoke-script.test.ts` (mock curl) fails 5 cases against the old script and passes against the fix.
+
+Release gates read from the GitHub API (read-only): `main` is unprotected; org Cloudflare secrets are `private`-visibility and this repository is public (not available to it); the runner group allows public repos and has 10 online runners. These are OUTSTANDING operator actions (see `docs/cicd.md`, "Production release gates"):
+- [ ] Grant `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` to this repository (or add repository secrets).
+- [ ] Protect `main`: PR required, 1 approval, required PR Verify check, push restrictions.
+- [ ] Optionally pre-create environment `anas-mcp/prod` (reviewers / main-only).
+- [ ] Confirm `workers.dev` and Preview URLs are disabled in the Cloudflare dashboard.
+- [ ] Execute the authenticated Service Token acceptance check (`docs/cicd.md`): initialize, tools/list, one read-only tool call, invalid-credential rejection. NOT yet run; no authenticated E2E success is claimed.
