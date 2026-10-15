@@ -11,11 +11,14 @@ info:
     server implementation and its MCP/Zod contracts; they are not modeled as
     fake REST endpoints here.
 
-    Production `/mcp` traffic requires a dedicated `anas-mcp` API key sent as
-    `Authorization: Bearer <key>`. The key is service-level (no per-user
-    identity) and is validated by the Worker against Cloudflare Secrets Store
-    before any MCP processing. It is unrelated to Cloudflare API tokens or any
-    provider/database credential.
+    Production `/mcp` is protected by one Cloudflare Access application that
+    concurrently accepts two authentication modes: Mode A, Managed OAuth
+    (interactive clients such as ChatGPT), and Mode B, Access Service Tokens
+    (headless agents and automation). Cloudflare Access evaluates the client
+    credentials at the edge and OAuth discovery/authorization is owned by
+    Access, not by this Worker. The Worker validates the resulting
+    `Cf-Access-Jwt-Assertion` application assertion before any MCP processing.
+    `/health` is outside the Access application and stays public.
 servers:
   - url: http://localhost:8787
     description: Local development
@@ -66,11 +69,16 @@ paths:
         enumerating MCP tools as REST operations. Use MCP initialization and
         `tools/list` to discover the active tool contract.
 
-        Requests must carry a valid dedicated API key as an HTTP bearer
-        credential. Authentication happens before MCP initialization or any
-        tool execution; failures return a generic `401`.
+        Requests are authenticated by Cloudflare Access (Managed OAuth or a
+        Service Token, concurrently) and reach the Worker with a signed
+        `Cf-Access-Jwt-Assertion`. The Worker verifies that assertion
+        (signature, issuer, application AUD, expiry) before MCP initialization,
+        tool execution, or database access. Requests Access rejects never reach
+        the Worker; Access answers with its own challenge/denial.
       security:
-        - McpApiKeyBearer: []
+        - CloudflareAccessOAuth: []
+        - CloudflareAccessServiceTokenId: []
+          CloudflareAccessServiceTokenSecret: []
       requestBody:
         required: true
         content:
@@ -79,7 +87,10 @@ paths:
               $ref: '#/components/schemas/McpProtocolMessage'
       responses:
         '200':
-          description: MCP protocol response or stream
+          description: >-
+            MCP protocol response. `application/json` for a single response;
+            `text/event-stream` when the client negotiates the Streamable
+            HTTP transport's SSE stream.
           content:
             application/json:
               schema:
@@ -87,7 +98,6 @@ paths:
             text/event-stream:
               schema:
                 type: string
-              description: Streamable MCP response when negotiated by the transport.
         '202':
           description: MCP notification/request accepted when the protocol operation does not require an immediate response body.
         '400':
@@ -97,13 +107,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
-          description: Missing, malformed, or invalid bearer credential. The body is a generic error and never echoes credentials.
-          headers:
-            WWW-Authenticate:
-              description: Authentication challenge
-              schema:
-                type: string
-                const: Bearer
+          description: The request reached the Worker without a valid Cloudflare Access assertion. The body is a generic error and never echoes credentials or assertion details.
           content:
             application/json:
               schema:
@@ -112,19 +116,97 @@ paths:
                 unauthorized:
                   value:
                     error: unauthorized
+        '403':
+          description: >-
+            Authenticated request rejected by the MCP SDK's DNS-rebinding
+            protections before any MCP processing: the `Host` is not
+            `mcp.firstsun.org` (or a localhost development name), or the
+            request carries any `Origin` header. Browser clients are not
+            supported; server-to-server clients send no `Origin`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpProtocolMessage'
+        '503':
+          description: >-
+            The Worker cannot validate Access assertions and fails closed
+            before any MCP processing. Either its non-secret Access
+            configuration (`ACCESS_TEAM_DOMAIN`/`ACCESS_AUD`) is missing or
+            invalid, or the Cloudflare Access JWKS (signing key document)
+            could not be fetched (network error, timeout, non-200, or
+            malformed response). Both are infrastructure/availability
+            failures, not proof that the caller's assertion is invalid, so
+            they are never reported as `401`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUnavailableResponse'
+              examples:
+                unavailable:
+                  value:
+                    error: auth_unavailable
         '404':
           description: Route not found or request is not valid for the configured MCP route
         '405':
           description: HTTP method not supported by the configured stateless transport
 components:
   securitySchemes:
-    McpApiKeyBearer:
-      type: http
-      scheme: bearer
+    CloudflareAccessOAuth:
+      type: oauth2
+      oauth2MetadataUrl: https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server
+      flows: {}
       description: |
-        Dedicated `anas-mcp` API key stored in Cloudflare Secrets Store and sent
-        as `Authorization: Bearer <key>`. Service-level credential; not an OAuth
-        token and not a Cloudflare API token.
+        Mode A. Cloudflare Access "Managed OAuth" for MCP servers (authorization
+        code + PKCE). Cloudflare Access, not this Worker, serves the actual
+        `authorization_endpoint` and `token_endpoint`. Per Cloudflare's own
+        documentation these are NOT fixed, published endpoints: a client MUST
+        discover them. Discovery sequence: (1) an unauthenticated `POST /mcp`
+        returns `401` whose `WWW-Authenticate` carries `resource_metadata=
+        "https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp"`
+        (RFC 9728); that document lists `authorization_servers:
+        ["https://firstsun.cloudflareaccess.com"]`; (2) the client fetches that
+        issuer's RFC 8414 metadata, which is `oauth2MetadataUrl` above, and uses
+        the `authorization_endpoint` / `token_endpoint` / `registration_endpoint`
+        values it returns. The authorization server is the Access team domain,
+        NOT the MCP resource host: `mcp.firstsun.org/.well-known/oauth-authorization-server`
+        is not an authorization server metadata endpoint (it returns 401). See
+        https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/.
+
+        `oauth2MetadataUrl` (OpenAPI 3.2, OAS §4.27.1, "OAuth2 Security Scheme
+        Support for RFC8414") is the field this specification defines for
+        exactly this situation: an OAuth 2.0 authorization server whose real
+        endpoints are discoverable, not fixed. `flows` is left as an empty
+        object (`{}`): the OpenAPI 3.2 schema requires the `flows` key to be
+        present for `type: oauth2`, but the `OAuth Flows Object` schema itself
+        has no required/minProperties constraint, so `{}` is schema-valid and
+        does not require fabricating an `authorizationCode`/`clientCredentials`
+        flow with hard-coded `authorizationUrl`/`tokenUrl` values that Access
+        does not publish and this contract cannot state truthfully.
+
+        Caveat: Swagger UI and other tooling that predates OpenAPI 3.2 or does
+        not yet implement `oauth2MetadataUrl`/RFC 8414 discovery will not be
+        able to drive this flow interactively from the empty `flows` object
+        alone; such tooling must be pointed at `oauth2MetadataUrl` directly.
+        Dynamic client registration, consent, and token issuance are owned by
+        Cloudflare Access and are not implemented by this Worker.
+    CloudflareAccessServiceTokenId:
+      type: apiKey
+      in: header
+      name: CF-Access-Client-Id
+      description: |
+        Mode B, part 1 of 2 (required together with
+        `CloudflareAccessServiceTokenSecret`). Cloudflare Access Service Token
+        Client ID, authorized by an Access `Service Auth` policy. Holding this
+        header alone is not sufficient; see `CloudflareAccessServiceTokenSecret`.
+    CloudflareAccessServiceTokenSecret:
+      type: apiKey
+      in: header
+      name: CF-Access-Client-Secret
+      description: |
+        Mode B, part 2 of 2 (required together with
+        `CloudflareAccessServiceTokenId`). Cloudflare Access Service Token
+        Client Secret. Held by the machine client's operator; never stored by
+        or sent to this Worker (Access validates it at the edge).
   schemas:
     UnauthorizedResponse:
       type: object
@@ -134,6 +216,14 @@ components:
         error:
           type: string
           const: unauthorized
+    AuthUnavailableResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          const: auth_unavailable
     HealthResponse:
       type: object
       additionalProperties: false
@@ -155,5 +245,5 @@ components:
       additionalProperties: true
     ErrorResponse:
       type: object
-      description: Safe error response that must not contain credentials, bearer credentials, or raw provider secrets.
+      description: Safe error response that must not contain credentials, Access assertions, OAuth tokens, or raw provider secrets.
       additionalProperties: true

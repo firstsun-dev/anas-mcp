@@ -11,7 +11,6 @@ Examples include:
 - Google OAuth credential JSON
 - OAuth client secrets owned by `anas-mcp`
 - API tokens used directly by `anas-mcp`
-- the dedicated MCP bearer API key (`ANAS_MCP_API_KEY`)
 - application signing/encryption secrets owned by `anas-mcp`
 - future provider credentials consumed by this Worker
 
@@ -96,19 +95,19 @@ Before introducing any credential, answer:
 5. Is the value accidentally duplicated in GitHub Actions, Wrangler config, `.env`, Hyperdrive, or another store?
 6. Is rotation possible without a source-code change?
 
-## MCP API key (`ANAS_MCP_API_KEY`)
+## MCP client authentication (no Worker-held credential)
 
-The dedicated bearer credential for `/mcp` is an application-owned Secrets Store credential. It authenticates MCP clients to `anas-mcp` and nothing else.
+Production `/mcp` authentication is Cloudflare Access (Managed OAuth and Service Token, concurrently; see `docs/mcp-authentication.md`). It adds **no** credential to the Worker or its Secrets Store.
 
-| Item | Value |
+| Material | Owner / location |
 | --- | --- |
-| Secrets Store secret (production) | `ANAS_PROD_MCP_API_KEY` |
-| Secrets Store secret (staging, when it exists) | `ANAS_STAGING_MCP_API_KEY` |
-| Worker binding | `ANAS_MCP_API_KEY` (configured in `wrangler.jsonc` `secrets_store_secrets`) |
+| OAuth access tokens, refresh tokens | Cloudflare Access (opaque, client-facing) and the OAuth client |
+| Service Token Client ID / Client Secret | The machine client's operator secret manager (the secret is shown once at creation; see `infra-config` for the Terraform state note) |
+| `Cf-Access-Jwt-Assertion` | Minted per request by Access; verified, never stored |
+| Access team domain, application AUD | Non-secret identifiers in `wrangler.jsonc` `vars` (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`) |
 
 Rules:
 
-- Generate it with a CSPRNG outside source control (see `docs/mcp-authentication.md`); never use a memorable string.
-- Staging and production use independent keys, rotated independently.
-- These are **not** valid substitutes: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `BING_WEBMASTER_API_KEY`, Google OAuth client secret/refresh token, PostgreSQL/Hyperdrive credentials, Clarity API token, GitHub Actions deployment token.
-- The binding is asynchronous (`await env.ANAS_MCP_API_KEY.get()`); the value must never be logged or returned.
+- Never copy a Service Token Client Secret, OAuth token, or assertion into this repository, Worker configuration, Secrets Store, CI logs, or application logs.
+- The transitional `ANAS_MCP_API_KEY` / `ANAS_PROD_MCP_API_KEY` Secrets Store credential (PR #8) is superseded and removed. Delete the `ANAS_PROD_MCP_API_KEY` secret from Secrets Store after the new Worker is deployed and verified (operator step; not done by this change).
+- These are **not** valid substitutes for MCP authentication: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `BING_WEBMASTER_API_KEY`, Google OAuth client secret/refresh token, PostgreSQL/Hyperdrive credentials, Clarity API token, GitHub Actions deployment token.

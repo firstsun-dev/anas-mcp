@@ -115,6 +115,43 @@ If OpenAPI validation becomes a standard requirement across Firstsun services, p
 
 Do not downgrade `openapi.yaml` to an older OpenAPI version merely because an outdated CI tool cannot parse 3.2. Update the validator/toolchain or make an explicit reviewed compatibility decision.
 
+## Pull request verification gate (interim, test-only)
+
+`.github/workflows/pr-verify.yml` runs on `pull_request` only and runs `npm ci`, `npm run check` (TypeScript, Vitest including the security/regression tests, `redocly lint openapi.yaml` for OpenAPI 3.2) and `npx wrangler deploy --dry-run`. It cannot deploy: no push/dispatch trigger, `permissions: contents: read`, no secrets, no Cloudflare credentials, no call to the shared template. `tests/repo-guardrails.test.ts` fails if any of that changes. It runs on a GitHub-hosted runner because this repository is public and PR code must not run on the organization's self-hosted runners.
+
+### Why PR #10 had no checks
+
+The repository has no `.github/workflows` directory, and the Actions API reports zero runs ever. Nothing was configured to produce a check; this was not a failure of the shared template.
+
+### Why the shared template cannot be used yet (verified against `_cf-worker-template.yml@v1`, commit `aeaab4c`)
+
+1. **npm incompatibility.** Every job runs `firstsun-dev/.github/actions/setup@v1`, whose `Install dependencies` step is `pnpm install --frozen-lockfile`. The template does not expose the action's `install` input. This repository has only `package-lock.json`, so even a test-only PR run would fail at setup. The deploy job also calls `pnpm exec wrangler`.
+2. **Unsafe branch deploys.** On any non-PR event the template deploys: `main` to production, every other branch to `--env dev`. This repository defines no `env.dev`. `npx wrangler deploy --dry-run --env dev` was run locally and only prints `No environment found in configuration with name "dev"`; it does not fail, and falls back to the top-level config, whose Worker name is the production script. Wiring the template with a `push: branches: ['**']` trigger (as the example above shows) would therefore deploy feature-branch pushes to production.
+3. **The template's PR behavior is safe**: for `pull_request` the migrate and deploy jobs are skipped by `github.event_name != 'pull_request'`, and the test jobs use no Cloudflare secrets. Its jobs default to runner label `linux`; the organization's self-hosted runners carry the `Linux` label, so PR code from a public repository would run on them.
+4. Only `test_unit_cmd`/`test_integration_cmd`/`test_e2e_cmd` jobs run on PRs; `build_cmd` is only used on deploy.
+
+### Smallest compatible path (proposal, not implemented here)
+
+Do not fork the deploy logic. Instead:
+
+1. In `firstsun-dev/.github`: let `_cf-worker-template.yml` pass an install command or `install: false` through to the setup action, and use `npm`/`pnpm exec` according to the lockfile present; add a test-only mode (or require callers to be PR-only) that never reaches deploy.
+2. In this repository: define `env.dev` (or a dedicated dev Worker name) in `wrangler.jsonc` so a non-`main` deploy can never resolve to the production script, and decide `app_version`, URLs and credentials.
+3. Only then replace `pr-verify.yml` with the thin caller, restricted to the events the team accepts.
+
+Until then, `pr-verify.yml` is a documented exception under the Change policy below (see `openspec/changes/use-centralized-cf-worker-ci/`). It contains no deployment, rollback or Cloudflare logic. Deployment remains manual and unautomated.
+
+### Verified result
+
+| Item | Value |
+| --- | --- |
+| Run | [`PR Verify` 38527650533](https://github.com/firstsun-dev/anas-mcp/actions/runs/38527650533) |
+| Event / date | `pull_request`, 2026-10-14 (created 07:20 UTC) |
+| Commit | `17af13cc0dbee643ae05eb97669bd289a2a6f95a` |
+| Conclusion | success; check run `Verify (npm ci, typecheck, tests, OpenAPI, wrangler dry-run)` |
+| Steps that passed | `npm ci` (lockfile-exact), `npm run check` (typecheck, Vitest, `redocly lint`), `wrangler deploy --dry-run` |
+
+This proves only that the PR verification steps pass on a GitHub-hosted runner for that commit. It is **not** a deployment: the workflow has no Cloudflare credentials and uploads nothing, and no production deployment, Access provisioning or E2E has been performed. A later commit needs its own run; the result above is not carried over to it. Branch protection / required checks are not configured by this repository.
+
 ## Secrets and deployment credentials
 
 Application runtime credentials continue to follow `docs/credentials.md` and are Secrets Store first.
@@ -128,7 +165,7 @@ CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
 
-Use least privilege. Do not copy runtime Google OAuth credentials, the MCP API key, Clarity tokens, or PostgreSQL passwords into GitHub Actions secrets solely for deployment.
+Use least privilege. Do not copy runtime Google OAuth credentials, MCP authentication material (Access/Service Token credentials), Clarity tokens, or PostgreSQL passwords into GitHub Actions secrets solely for deployment.
 
 ## Branch behavior
 
@@ -146,11 +183,15 @@ Re-check the current `firstsun-dev/.github` workflow before changing caller assu
 
 Deployment success alone does not prove MCP authentication works.
 
-When the production MCP API key is provisioned, post-deploy verification should cover at minimum:
+Once Cloudflare Access is in front of `/mcp` (`docs/cloudflare-access.md`), post-deploy verification should cover at minimum:
 
-- `/health` returns only minimal readiness without credentials
-- `/mcp` without `Authorization`, or with an invalid bearer value, returns `401` and cannot invoke MCP tools
-- the valid dedicated API key can initialize MCP and list tools (the key must come from an operator-held secret, never from CI logs or committed files)
+- `GET /health` on `https://mcp.firstsun.org` returns only minimal readiness without credentials
+- `/mcp` without credentials is blocked/challenged by Access and cannot invoke MCP tools
+- a Service Token request (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) can initialize MCP and list tools; Managed OAuth is verified interactively. Service Token credentials must come from an operator-held secret, never from CI logs or committed files
+- the Worker rejects a request with no/invalid `Cf-Access-Jwt-Assertion` (covered by unit tests; do not bypass Access to test it in production)
+- `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` are non-empty in the deployed Worker (empty values make `/mcp` return `503`)
+
+This repository currently has no deployment workflow (only the test-only `pr-verify.yml`), so nothing deploys from `main` yet. Once one is added, rollout ordering in `docs/cloudflare-access.md` applies.
 
 Do not put reusable auth test implementation into the caller workflow if it can be generalized in `firstsun-dev/.github`.
 

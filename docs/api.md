@@ -50,15 +50,15 @@ If served by this Worker in a future change, prefer routes such as:
 
 or equivalent static/generated documentation paths.
 
-Do not expose credentials, bearer API keys, provider tokens, Hyperdrive connection details, or analytics payload examples containing private production data in Swagger/OpenAPI documentation.
+Do not expose credentials, Access assertions, OAuth tokens, Service Token secrets, provider tokens, Hyperdrive connection details, or analytics payload examples containing private production data in Swagger/OpenAPI documentation.
 
 Whether `/docs` is public or Access-protected must be an explicit decision. A public schema is acceptable only if it contains no sensitive operational information.
 
-## Bearer API-key representation
+## Cloudflare Access representation
 
-Production `/mcp` requires `Authorization: Bearer <ANAS_MCP_API_KEY>`, a dedicated service-level key validated by the Worker against Cloudflare Secrets Store. `openapi.yaml` models this as the HTTP bearer security scheme `McpApiKeyBearer`.
+Production `/mcp` is protected by one Cloudflare Access application that concurrently accepts Mode A (Managed OAuth) and Mode B (Access Service Token). `openapi.yaml` lists both as alternative security requirements: `CloudflareAccessOAuth` (`type: oauth2`, `oauth2MetadataUrl` pointing at the Access team's RFC 8414 Authorization Server Metadata document, `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server`, which is the authorization server advertised by the resource's RFC 9728 protected-resource metadata at `https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp` — not a path on the MCP host — rather than a fixed `flows.authorizationCode` with hard-coded `authorizationUrl`/`tokenUrl`, since Cloudflare Access does not publish fixed ones for this flow) and `CloudflareAccessServiceTokenId` + `CloudflareAccessServiceTokenSecret` (headers `CF-Access-Client-Id` and `CF-Access-Client-Secret`, required together in the same security requirement, since Service Token auth needs both). OAuth discovery/authorization/token endpoints are owned by Cloudflare Access and are not implemented or enumerated by the Worker.
 
-The contract documents `401` (missing/invalid credential, with `WWW-Authenticate: Bearer`). There is no per-user authorization, so no identity-based `403` is documented. No OAuth endpoints exist, and no example credential is embedded. See `docs/mcp-authentication.md`.
+The contract documents the Worker-origin responses `401` (no valid `Cf-Access-Jwt-Assertion`), `403` (unexpected `Host` or any `Origin`; see `docs/mcp-authentication.md`) and `503` (Worker Access configuration missing; fails closed). Access's own challenges/denials happen at the edge and never reach the Worker. `/health` is outside the Access application (`security: []`). No example credential, token, assertion, or production AUD is embedded. See `docs/mcp-authentication.md`.
 
 ## MCP transport
 
@@ -93,9 +93,7 @@ MCP tool-only changes do not require fake OpenAPI paths, but they still require 
 
 ## Validation
 
-CI should lint/validate `openapi.yaml` before deployment.
-
-Use a validator that supports OpenAPI 3.2.0. Do not silently downgrade the file to OpenAPI 3.0/3.1 solely because an outdated linter cannot parse it; update the shared CI toolchain or document an accepted compatibility decision.
+`npm run check` runs `npm run lint:openapi` (`redocly lint openapi.yaml`, `@redocly/cli` pinned in `package.json`/`package-lock.json`), which validates OpenAPI 3.2.0 natively (verified with `@redocly/cli` 2.62.1; no downgrade to 3.0/3.1 was needed). A clean run has 0 errors. It currently reports 3 non-blocking warnings that are informational, not structural: `info-license` (this repository has no `LICENSE` file, and adding a `license` field without one would misstate the project's actual licensing), `no-server-example-com` (the `http://localhost:8787` local-dev server entry, which is intentional), and `operation-4xx-response` (`/health` has no 4xx because it is deliberately unauthenticated and unconditional). `redocly lint` exits `0` with warnings only, so CI fails only on real structural errors.
 
 Swagger UI/Editor rendering should also be checked when the documentation tooling changes.
 

@@ -29,12 +29,47 @@ describe("repository guardrails", () => {
     expect(service).toMatch(/READ ONLY/);
     expect(service).not.toMatch(/export\s+(async\s+)?function\s+(executeSql|rawQuery)/);
   });
-  it("wrangler.jsonc binds only the MCP API key from Secrets Store (no Bing binding) and uses the ANALYTICS_DB Hyperdrive binding", () => {
+  it("wrangler.jsonc has only non-secret Access vars, no Secrets Store bindings, and the ANALYTICS_DB Hyperdrive binding", () => {
     const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;
-    expect(config.secrets_store_secrets).toEqual([expect.objectContaining({ binding: "ANAS_MCP_API_KEY" })]);
-    expect(config.vars).toBeUndefined();
+    expect(config.secrets_store_secrets).toBeUndefined();
+    expect(Object.keys(config.vars ?? {}).sort()).toEqual(["ACCESS_AUD", "ACCESS_TEAM_DOMAIN"]);
     expect(config.hyperdrive).toEqual([expect.objectContaining({ binding: "ANALYTICS_DB" })]);
     expect(JSON.stringify(config)).not.toMatch(/bing|apikey|postgres(ql)?:\/\//i);
+  });
+  it("workers.dev and Version/Preview URLs are disabled so Access on the custom domain cannot be bypassed", () => {
+    // workers.dev and Version/Preview URLs are a separate ingress that does not go through the Access
+    // application attached to the custom domain. If either were left enabled (or omitted, since `workers_dev`
+    // defaults to `true` when no `routes`/`route` field is configured here), `/mcp` would be reachable without
+    // a Cloudflare Access assertion. See wrangler.jsonc and docs/cloudflare-access.md.
+    const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;
+    expect(config.workers_dev).toBe(false);
+    expect(config.preview_urls).toBe(false);
+  });
+  it("never configures wildcard Host or Origin acceptance for the MCP handler", () => {
+    const code = stripComments(read("src/index.ts"));
+    expect(code).toMatch(/allowedOriginHostnames:\s*\[\]/);
+    expect(code).toMatch(/allowedHostnames:\s*MCP_ALLOWED_HOSTNAMES/);
+    expect(code).not.toMatch(/allowed(Origin)?Hostnames:\s*"\*"/);
+    expect(code).not.toMatch(/MCP_PUBLIC_HOSTNAME\s*=\s*"[^"]*\*/);
+  });
+  it("the PR verification workflow cannot deploy: pull_request only, read-only, no secrets, dry-run wrangler, hosted runner", () => {
+    const wf = read(".github/workflows/pr-verify.yml");
+    const code = wf.replace(/^\s*#.*$/gm, "");
+    expect(code).toMatch(/^on:\s*\n\s+pull_request:\s*$/m);
+    expect(code).not.toMatch(/^\s+(push|workflow_dispatch|schedule|pull_request_target|workflow_run):/m);
+    expect(code).toMatch(/permissions:\s*\n\s+contents: read\s*\n/);
+    expect(code).not.toMatch(/\bsecrets\b|CLOUDFLARE_|id-token|contents: write|uses:\s*firstsun-dev\//);
+    expect(code).not.toMatch(/wrangler (deploy(?! --dry-run)|versions|rollback|secret)/);
+    expect(code).toMatch(/npm ci/);
+    expect(code).toMatch(/npm run check/);
+    expect(code).toMatch(/wrangler deploy --dry-run/);
+    expect(code).toMatch(/runs-on:\s*ubuntu-latest/);
+  });
+  it("the transitional Worker-local API key is fully removed (Access JWT is the only production gate)", () => {
+    expect(sourceFiles("src")).not.toContain("src/auth/mcp-api-key.ts");
+    const code = stripComments(allSource() + read("wrangler.jsonc"));
+    expect(code).not.toMatch(/ANAS_MCP_API_KEY|ANAS_PROD_MCP_API_KEY|SecretsStoreSecret|secrets_store/);
+    expect(code).not.toMatch(/headers\.get\(["']authorization["']\)/i);
   });
   it("no database URL or credential is committed in config or source", () => {
     expect(stripComments(read("wrangler.jsonc")) + stripComments(allSource())).not.toMatch(/postgres(ql)?:\/\/[^\s"']*@/i);
