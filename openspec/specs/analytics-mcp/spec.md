@@ -132,10 +132,12 @@ Production and development Worker deployment SHALL use the reusable Cloudflare W
 - AND runtime credentials such as Google OAuth JSON, Bing Webmaster tokens, Clarity tokens, PostgreSQL passwords, OAuth access tokens, Access assertions, or Service Token credentials SHALL NOT be copied into CI solely for deployment
 
 #### Scenario: Caller workflow is enabled
-- GIVEN this repository currently uses npm scripts and the shared workflow currently invokes `pnpm exec wrangler` internally
+- GIVEN the shared workflow runs `pnpm install --frozen-lockfile` and `pnpm exec wrangler`, and this repository uses pnpm with a committed `pnpm-lock.yaml`
 - WHEN the CI caller is enabled
-- THEN package-manager compatibility SHALL be verified first
-- AND a mismatch SHALL be resolved by aligning the project or improving the centralized workflow rather than duplicating deploy steps locally
+- THEN it SHALL trigger on push to `main` only, reference the reusable workflow at a pinned release tag or commit, and use only inputs the template declares
+- AND pull requests SHALL run only the credential-free `pr-verify.yml`
+- AND production deployments SHALL be serialized and SHALL NOT be automatically rolled back to a version that may predate Cloudflare Access authentication
+- AND read-only post-deploy smoke checks SHALL fail the run and require operator intervention on failure
 
 ### Requirement: Read-only analytics access
 The service SHALL expose analytics data only through read-only operations.

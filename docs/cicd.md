@@ -9,10 +9,10 @@ The application repository may contain a thin caller workflow that defines trigg
 Canonical reusable workflow:
 
 ```yaml
-uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1
+uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1.5.0
 ```
 
-If the organization adopts a commit-pinned reference for deployment immutability, the caller may pin an approved commit SHA instead of `@v1`. Do not point production deployment at an arbitrary feature branch.
+The caller pins a release tag (or an approved commit SHA). Do not point production deployment at a branch or the floating `@v1`.
 
 ## Ownership
 
@@ -46,111 +46,81 @@ Owns only application-specific caller configuration and project verification, fo
 
 The caller workflow must remain thin.
 
-## Expected caller shape
+## Production caller (`.github/workflows/cicd.yml`)
 
-The final caller should follow the organization's existing Cloudflare Worker pattern, conceptually:
+Verified against `_cf-worker-template.yml@v1.5.0` (tag commit `cd1cdc0ab29d5069bc31b5faef55d271e62dac36`); the shared repository is consumed unmodified.
 
 ```yaml
-name: CI/CD
-
 on:
   push:
-    branches: ['**']
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  checks: write
-
+    branches: [main]
 concurrency:
-  group: anas-mcp-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
+  group: anas-mcp-production-deploy
+  cancel-in-progress: false
 jobs:
   pipeline:
-    uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1
+    uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1.5.0
     secrets: inherit
     with:
       app_name: anas-mcp
       app_path: .
-      app_version: <version expression determined by the project release strategy>
-      build_cmd: <install/build/check command compatible with the shared runner>
-      test_unit_cmd: <optional>
-      test_integration_cmd: <optional>
-      verify_cmd: <optional MCP/health smoke verification>
-      app_url_prod: <production URL when provisioned>
-      app_url_dev: <development URL when provisioned>
+      app_version: ${{ github.sha }}
+      test_unit_cmd: pnpm run check
+      build_cmd: pnpm exec wrangler deploy --dry-run
+      app_url_prod: https://mcp.firstsun.org
+  smoke: # read-only, see below
 ```
 
-The project check used by this caller must eventually include both TypeScript verification and `openapi.yaml` validation with an OpenAPI 3.2-capable validator.
+- **Main only.** The only trigger is `push` to `main`. There is no `pull_request`, `workflow_dispatch`, or other-branch trigger, so the template's `--env dev` branch path (this repository defines no `env.dev`) can never run, and PR code never reaches the deploy-capable pipeline or the org's self-hosted runners. `enable_preview_alias`, `app_url_dev`, and `worker_name_dev` are unset.
+- **Pinned.** `@v1.5.0` is a release tag, not a branch or floating `@v1`. `tests/repo-guardrails.test.ts` rejects `@main`/`@v1` and any input the template does not declare. Pinning to the commit SHA is stricter (tags are mutable) and is allowed by the test.
+- **Inputs.** `app_version` is the commit SHA (the template runs `pnpm -r version` on it with `|| true`; verified locally that with this `pnpm-workspace.yaml` it matches no projects and exits 0, so `package.json` is not rewritten). `test_unit_cmd` runs the aggregate check (typecheck, Vitest, `redocly lint`) before any migrate/deploy job. `build_cmd` is the template's only build hook; the Worker is bundled by `wrangler versions upload`, so a dry-run build is a no-op safety gate. `verify_cmd` is deliberately unset (see Smoke tests).
+- **Runner.** The template default (`linux`, the org's trusted self-hosted runners) is used. Only merged `main` code runs there.
+- **Serialization.** The template defines no `concurrency`. The caller does: one production deployment at a time, `cancel-in-progress: false` so a running deploy is never cancelled; GitHub keeps at most one pending run, so a newer push supersedes an older queued one (latest `main` wins).
+- **Credentials.** The template declares no `secrets:` block, so `secrets: inherit` is required. It reads only `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (organization secrets). Smoke and PR jobs receive no secrets.
 
-This is a contract example, not a license to guess unresolved values.
+### Effective production configuration (verified non-deploying)
 
-## Package-manager compatibility
+The template runs `wrangler versions upload --message … --var COMMIT_HASH:<sha7> --var VERSION:<sha>` then `wrangler versions deploy <id>@100`. Running the same arguments with `--dry-run` (Wrangler 4.149.0) lists:
 
-The current `anas-mcp` repository uses npm scripts, while the shared Cloudflare Worker template currently invokes `pnpm exec wrangler` internally during deployment.
+```text
+env.ANALYTICS_DB (8677c23a…)       Hyperdrive Config
+env.ACCESS_TEAM_DOMAIN             Environment Variable
+env.ACCESS_AUD                     Environment Variable
+env.COMMIT_HASH ("(hidden)")       Environment Variable
+env.VERSION ("(hidden)")           Environment Variable
+```
 
-Before enabling deployment, verify one of the following with the current shared workflow version:
+`--var` adds to, and does not replace, the `vars` in `wrangler.jsonc`, so `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, and the `ANALYTICS_DB` Hyperdrive binding are preserved. A guardrail test fails if `COMMIT_HASH`/`VERSION` are ever added to `vars`.
 
-1. an npm-installed `node_modules` layout is compatible with the template's `pnpm exec wrangler` calls; or
-2. align this repository with the Firstsun pnpm convention and commit the appropriate lockfile; or
-3. update the reusable workflow centrally in `firstsun-dev/.github` to support the required package-manager contract.
+**Residual risk (not verifiable without deploying):** `workers_dev: false` and `preview_urls: false` are, to our understanding of Wrangler, applied by `wrangler deploy`, not by `versions upload`/`versions deploy` (not verified without deploying). The template never runs `wrangler deploy`, so these settings are not re-asserted on each release; they rely on the Worker's current subdomain/preview-URL state. Operators must confirm in the Cloudflare dashboard (Worker → Settings → Domains & Routes) that the `workers.dev` route and Preview URLs are disabled, and the custom domain `mcp.firstsun.org` is attached. Fixing this generically would be a change to `firstsun-dev/.github` and is out of scope here.
 
-Do NOT copy the deployment steps into this repository merely to bypass a package-manager mismatch.
+## Smoke tests and rollback
 
-## OpenAPI validation gate
+The template's `verify_cmd` path installs Playwright and, on failure, runs `wrangler versions deploy <previous>@100`. For this service that is unsafe: the previous version may predate Cloudflare Access authentication, so an automatic revert could reopen `/mcp` with a weaker gate. `verify_cmd` is therefore unset and the caller adds an application-specific `smoke` job (`scripts/smoke-prod.sh`; GitHub-hosted, no secrets, `contents: read`) that runs after a successful `pipeline` and checks, with unauthenticated requests only:
 
-`openapi.yaml` is the canonical HTTP contract and uses OpenAPI 3.2.0. See `docs/api.md`.
+1. `GET /health` is `200` with `{service: "anas-mcp", status: "ok"}`.
+2. `POST /mcp` without credentials is `401`/`403` and returns no `tools`.
+3. `GET /.well-known/cloudflare-access-protected-resource/mcp` returns `200` with `resource == https://mcp.firstsun.org/mcp` and the Access issuer in `authorization_servers`.
+4. `GET <issuer>/.well-known/oauth-authorization-server` is reachable and its `issuer` equals `https://firstsun.cloudflareaccess.com` (the `ACCESS_TEAM_DOMAIN` in `wrangler.jsonc`; a test guards drift).
 
-Before deployment is enabled:
+Transient `5xx`/connection errors are retried (6 × 5 s). On failure the job fails the run with "OPERATOR INTERVENTION REQUIRED".
 
-- select an OpenAPI 3.2-capable validator;
-- add a local `check:openapi` or equivalent command;
-- include it in the project's aggregate `check` command;
-- configure the thin caller/shared pipeline so that the aggregate check runs before deployment;
-- fail CI when the OpenAPI contract is invalid.
+**This design has NO automatic rollback.** A failed smoke test leaves the new version live. Operators must decide to roll forward or manually run `wrangler versions deploy <known-good-id>@100` after confirming that version has the Access gate. The smoke checks do not prove an authenticated MCP session works; that still requires an operator-held Access credential (Managed OAuth or Service Token) and is not performed in CI.
 
-If OpenAPI validation becomes a standard requirement across Firstsun services, prefer adding reusable validation support in `firstsun-dev/.github` rather than duplicating generic setup in every repository.
+## Pull request verification gate
 
-Do not downgrade `openapi.yaml` to an older OpenAPI version merely because an outdated CI tool cannot parse 3.2. Update the validator/toolchain or make an explicit reviewed compatibility decision.
+`.github/workflows/pr-verify.yml` runs on `pull_request` only: `pnpm install --frozen-lockfile`, `pnpm run check` (TypeScript, Vitest including security/regression tests, `redocly lint openapi.yaml` for OpenAPI 3.2) and `pnpm exec wrangler deploy --dry-run`. It cannot deploy: no push/dispatch trigger, `permissions: contents: read`, no secrets, no Cloudflare credentials, no call to the shared template, GitHub-hosted runner (this repository is public; PR code must not run on self-hosted runners). `tests/repo-guardrails.test.ts` fails if any of that changes. To make a failing check block merging, require the `PR Verify / Verify (…)` check in branch protection for `main` (a repository setting; not configured by this repository).
 
-## Pull request verification gate (interim, test-only)
+## Package manager
 
-`.github/workflows/pr-verify.yml` runs on `pull_request` only and runs `npm ci`, `npm run check` (TypeScript, Vitest including the security/regression tests, `redocly lint openapi.yaml` for OpenAPI 3.2) and `npx wrangler deploy --dry-run`. It cannot deploy: no push/dispatch trigger, `permissions: contents: read`, no secrets, no Cloudflare credentials, no call to the shared template. `tests/repo-guardrails.test.ts` fails if any of that changes. It runs on a GitHub-hosted runner because this repository is public and PR code must not run on the organization's self-hosted runners.
+The repository uses **pnpm** (`packageManager: pnpm@10.33.0`, matching `blog`, `heaven-monorepo` and `innovation-apps`), with a committed `pnpm-lock.yaml` and `pnpm-workspace.yaml` (`allowBuilds`). `package-lock.json` is removed. The shared setup action runs `pnpm install --frozen-lockfile` and the template calls `pnpm exec wrangler`; both were exercised locally with pnpm 10.33.0 on Node 24 (the template's `NODE_VERSION`). The self-hosted runner image bakes in Node/pnpm (`setup-node`/`setup-pnpm: false`); its pnpm version cannot be inspected from here and is verified only by the first run on `main`.
 
-### Why PR #10 had no checks
+## Required GitHub configuration (not set by this repository)
 
-The repository has no `.github/workflows` directory, and the Actions API reports zero runs ever. Nothing was configured to produce a check; this was not a failure of the shared template.
-
-### Why the shared template cannot be used yet (verified against `_cf-worker-template.yml@v1`, commit `aeaab4c`)
-
-1. **npm incompatibility.** Every job runs `firstsun-dev/.github/actions/setup@v1`, whose `Install dependencies` step is `pnpm install --frozen-lockfile`. The template does not expose the action's `install` input. This repository has only `package-lock.json`, so even a test-only PR run would fail at setup. The deploy job also calls `pnpm exec wrangler`.
-2. **Unsafe branch deploys.** On any non-PR event the template deploys: `main` to production, every other branch to `--env dev`. This repository defines no `env.dev`. `npx wrangler deploy --dry-run --env dev` was run locally and only prints `No environment found in configuration with name "dev"`; it does not fail, and falls back to the top-level config, whose Worker name is the production script. Wiring the template with a `push: branches: ['**']` trigger (as the example above shows) would therefore deploy feature-branch pushes to production.
-3. **The template's PR behavior is safe**: for `pull_request` the migrate and deploy jobs are skipped by `github.event_name != 'pull_request'`, and the test jobs use no Cloudflare secrets. Its jobs default to runner label `linux`; the organization's self-hosted runners carry the `Linux` label, so PR code from a public repository would run on them.
-4. Only `test_unit_cmd`/`test_integration_cmd`/`test_e2e_cmd` jobs run on PRs; `build_cmd` is only used on deploy.
-
-### Smallest compatible path (proposal, not implemented here)
-
-Do not fork the deploy logic. Instead:
-
-1. In `firstsun-dev/.github`: let `_cf-worker-template.yml` pass an install command or `install: false` through to the setup action, and use `npm`/`pnpm exec` according to the lockfile present; add a test-only mode (or require callers to be PR-only) that never reaches deploy.
-2. In this repository: define `env.dev` (or a dedicated dev Worker name) in `wrangler.jsonc` so a non-`main` deploy can never resolve to the production script, and decide `app_version`, URLs and credentials.
-3. Only then replace `pr-verify.yml` with the thin caller, restricted to the events the team accepts.
-
-Until then, `pr-verify.yml` is a documented exception under the Change policy below (see `openspec/changes/use-centralized-cf-worker-ci/`). It contains no deployment, rollback or Cloudflare logic. Deployment remains manual and unautomated.
-
-### Verified result
-
-| Item | Value |
-| --- | --- |
-| Run | [`PR Verify` 38527650533](https://github.com/firstsun-dev/anas-mcp/actions/runs/38527650533) |
-| Event / date | `pull_request`, 2026-10-14 (created 07:20 UTC) |
-| Commit | `17af13cc0dbee643ae05eb97669bd289a2a6f95a` |
-| Conclusion | success; check run `Verify (npm ci, typecheck, tests, OpenAPI, wrangler dry-run)` |
-| Steps that passed | `npm ci` (lockfile-exact), `npm run check` (typecheck, Vitest, `redocly lint`), `wrangler deploy --dry-run` |
-
-This proves only that the PR verification steps pass on a GitHub-hosted runner for that commit. It is **not** a deployment: the workflow has no Cloudflare credentials and uploads nothing, and no production deployment, Access provisioning or E2E has been performed. A later commit needs its own run; the result above is not carried over to it. Branch protection / required checks are not configured by this repository.
+- Organization/repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, available to this repository (least privilege: Workers Scripts edit for the `anas-mcp` script only).
+- Self-hosted runner label `linux` must be available to this repository (runner group access).
+- GitHub environment `anas-mcp/prod` is referenced by the template's deploy job; GitHub creates it on first use. Add required reviewers there if a manual approval gate is wanted.
+- Branch protection on `main` requiring the PR Verify check.
 
 ## Secrets and deployment credentials
 
@@ -169,31 +139,7 @@ Use least privilege. Do not copy runtime Google OAuth credentials, MCP authentic
 
 ## Branch behavior
 
-Follow the shared workflow contract rather than reimplementing branch routing locally.
-
-At the time this decision was recorded, the central template treats:
-
-- pull requests as test-only
-- `main` branch pushes as production deployment
-- other branch pushes as development deployment
-
-Re-check the current `firstsun-dev/.github` workflow before changing caller assumptions.
-
-## Production authentication verification
-
-Deployment success alone does not prove MCP authentication works.
-
-Once Cloudflare Access is in front of `/mcp` (`docs/cloudflare-access.md`), post-deploy verification should cover at minimum:
-
-- `GET /health` on `https://mcp.firstsun.org` returns only minimal readiness without credentials
-- `/mcp` without credentials is blocked/challenged by Access and cannot invoke MCP tools
-- a Service Token request (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) can initialize MCP and list tools; Managed OAuth is verified interactively. Service Token credentials must come from an operator-held secret, never from CI logs or committed files
-- the Worker rejects a request with no/invalid `Cf-Access-Jwt-Assertion` (covered by unit tests; do not bypass Access to test it in production)
-- `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` are non-empty in the deployed Worker (empty values make `/mcp` return `503`)
-
-This repository currently has no deployment workflow (only the test-only `pr-verify.yml`), so nothing deploys from `main` yet. Once one is added, rollout ordering in `docs/cloudflare-access.md` applies.
-
-Do not put reusable auth test implementation into the caller workflow if it can be generalized in `firstsun-dev/.github`.
+The central template treats pull requests as test-only, `main` pushes as production deployment, and every other branch push as `--env dev`. `anas-mcp` defines no `env.dev`, so the caller must never run the template for non-`main` events; it triggers on `main` only. Re-check the template before bumping `@v1.5.0`.
 
 ## Change policy
 

@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
@@ -60,10 +61,87 @@ describe("repository guardrails", () => {
     expect(code).toMatch(/permissions:\s*\n\s+contents: read\s*\n/);
     expect(code).not.toMatch(/\bsecrets\b|CLOUDFLARE_|id-token|contents: write|uses:\s*firstsun-dev\//);
     expect(code).not.toMatch(/wrangler (deploy(?! --dry-run)|versions|rollback|secret)/);
-    expect(code).toMatch(/npm ci/);
-    expect(code).toMatch(/npm run check/);
-    expect(code).toMatch(/wrangler deploy --dry-run/);
+    expect(code).toMatch(/pnpm install --frozen-lockfile/);
+    expect(code).toMatch(/pnpm run check/);
+    expect(code).toMatch(/pnpm exec wrangler deploy --dry-run/);
+    expect(code).not.toMatch(/\bnpm\b|\bnpx\b/);
     expect(code).toMatch(/runs-on:\s*ubuntu-latest/);
+  });
+  describe("production CI/CD caller", () => {
+    const raw = read(".github/workflows/cicd.yml");
+    const code = raw.replace(/^\s*#.*$/gm, "");
+    const wf = parse(raw) as Record<string, any>;
+    // Inputs published by _cf-worker-template.yml@v1.5.0 (verified against the tag); an unknown input fails the caller.
+    const TEMPLATE_INPUTS = new Set([
+      "app_name", "app_path", "app_version", "build_cmd", "migrate_cmd_prod", "migrate_cmd_dev", "test_unit_cmd",
+      "test_integration_cmd", "test_e2e_setup_cmd", "test_e2e_cmd", "test_e2e_variants", "verify_cmd", "app_url_prod",
+      "app_url_dev", "runner", "use_mailpit", "vite_env_prod", "vite_env_dev", "test_e2e_env", "verify_env",
+      "enable_preview_alias", "worker_name_dev",
+    ]);
+
+    it("triggers on push to main only (no PR, dispatch, schedule, or other branches)", () => {
+      expect(wf.on).toEqual({ push: { branches: ["main"] } });
+    });
+    it("delegates to the reusable workflow pinned to an immutable-style release ref, with only supported inputs", () => {
+      const pipeline = wf.jobs.pipeline;
+      expect(pipeline.uses).toMatch(
+        /^firstsun-dev\/\.github\/\.github\/workflows\/_cf-worker-template\.yml@(v\d+\.\d+\.\d+|[0-9a-f]{40})$/,
+      );
+      expect(pipeline.uses).not.toMatch(/@(main|master|v\d+)$/);
+      for (const key of Object.keys(pipeline.with)) expect(TEMPLATE_INPUTS.has(key), key).toBe(true);
+      expect(pipeline.with).toMatchObject({
+        app_name: "anas-mcp",
+        app_path: ".",
+        test_unit_cmd: "pnpm run check",
+        build_cmd: "pnpm exec wrangler deploy --dry-run",
+        app_url_prod: "https://mcp.firstsun.org",
+      });
+      expect(pipeline.with.app_version).toBe("${{ github.sha }}");
+    });
+    it("does not enable dev/preview deploys or the rollback-capable verify path", () => {
+      const keys = Object.keys(wf.jobs.pipeline.with);
+      for (const k of ["verify_cmd", "app_url_dev", "worker_name_dev", "enable_preview_alias", "migrate_cmd_prod", "migrate_cmd_dev"])
+        expect(keys).not.toContain(k);
+    });
+    it("serializes production deploys without cancelling an in-flight one", () => {
+      expect(wf.concurrency).toEqual({ group: "anas-mcp-production-deploy", "cancel-in-progress": false });
+    });
+    it("duplicates no deployment logic: no wrangler upload/deploy/rollback/secret commands in the caller or smoke script", () => {
+      const smoke = read("scripts/smoke-prod.sh").replace(/^\s*#.*$/gm, "");
+      for (const text of [code, smoke]) {
+        expect(text).not.toMatch(/wrangler (deploy(?! --dry-run)|versions|rollback|secret|publish)/);
+        expect(text).not.toMatch(/CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|--var\b|--env\b/);
+      }
+      expect(Object.keys(wf.jobs).sort()).toEqual(["pipeline", "smoke"]);
+    });
+    it("smoke job is credential-free, GitHub-hosted, read-only, and never reverts", () => {
+      const smoke = wf.jobs.smoke;
+      expect(smoke.needs).toBe("pipeline");
+      expect(smoke["runs-on"]).toBe("ubuntu-latest");
+      expect(smoke.permissions).toEqual({ contents: "read" });
+      expect(JSON.stringify(smoke)).not.toMatch(/secrets\./);
+      const script = read("scripts/smoke-prod.sh").replace(/^\s*#.*$/gm, "");
+      expect(script).not.toMatch(/-X (PUT|DELETE|PATCH)|-H\s+["']?authorization|cf-access-client|wrangler|versions deploy/i);
+    });
+    it("smoke targets match the Worker's configured hostname and Access issuer (no drift)", () => {
+      const env = wf.jobs.smoke.steps.find((s: any) => s.env).env;
+      const vars = (JSON.parse(stripComments(read("wrangler.jsonc"))) as any).vars;
+      expect(env.EXPECTED_ISSUER).toBe(`https://${vars.ACCESS_TEAM_DOMAIN}`);
+      expect(env.BASE_URL).toBe("https://mcp.firstsun.org");
+      expect(read("src/index.ts")).toContain('MCP_PUBLIC_HOSTNAME = "mcp.firstsun.org"');
+    });
+    it("the shared template's --var COMMIT_HASH/VERSION cannot collide with configured vars", () => {
+      const vars = (JSON.parse(stripComments(read("wrangler.jsonc"))) as any).vars;
+      expect(Object.keys(vars)).not.toContain("COMMIT_HASH");
+      expect(Object.keys(vars)).not.toContain("VERSION");
+    });
+  });
+  it("uses pnpm: pinned packageManager, committed pnpm lockfile, no npm lockfile", () => {
+    const pkg = JSON.parse(read("package.json")) as Record<string, any>;
+    expect(pkg.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+    expect(pkg.scripts.check).not.toMatch(/\bnpm\b/);
+    expect(existsSync(new URL("../pnpm-lock.yaml", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("../package-lock.json", import.meta.url))).toBe(false);
   });
   it("the transitional Worker-local API key is fully removed (Access JWT is the only production gate)", () => {
     expect(sourceFiles("src")).not.toContain("src/auth/mcp-api-key.ts");
