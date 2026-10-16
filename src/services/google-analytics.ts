@@ -237,7 +237,7 @@ export interface GoogleAnalyticsClientOptions {
   timeoutMs?: number;
 }
 
-async function readBounded(response: Response): Promise<string | undefined> {
+export async function readBounded(response: Response): Promise<string | undefined> {
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) return undefined;
   if (!response.body) return "";
@@ -263,7 +263,7 @@ async function readBounded(response: Response): Promise<string | undefined> {
   return new TextDecoder().decode(all);
 }
 
-function retryAfter(response: Response): number | undefined {
+export function retryAfter(response: Response): number | undefined {
   const raw = response.headers.get("retry-after");
   if (raw === null) return undefined;
   const n = Number(raw);

@@ -1,6 +1,6 @@
 # GA4 MCP tools and Google authentication
 
-Phase 2 of the analytics MCP (issue #15). OpenSpec: `openspec/changes/add-ga4-analytics-tools/`. Search Console (Phase 3) reuses `src/auth/google-oauth.ts`.
+Phase 2 of the analytics MCP (issue #15). OpenSpec: `openspec/changes/add-ga4-analytics-tools/`. Search Console (Phase 3, `docs/gsc.md`) reuses `src/auth/google-oauth.ts`.
 
 GA4 is queried directly through the **Google Analytics Data API** (`POST https://analyticsdata.googleapis.com/v1beta/properties/{id}:runReport`). It is read-only. Google API authorization is separate from Cloudflare Access: MCP clients are still authenticated only by Access (`docs/mcp-authentication.md`), and Google is never contacted before the Access assertion is validated.
 
