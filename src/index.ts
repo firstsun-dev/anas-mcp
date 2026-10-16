@@ -17,6 +17,13 @@ export interface Env {
   ANALYTICS_DB?: Hyperdrive;
   /** Comma-separated approved Clarity `project_key` values (non-secret). Clarity tools fail closed until set. */
   CLARITY_PROJECT_KEYS?: string;
+  /**
+   * Secrets Store binding holding the shared Google OAuth `authorized_user` credential JSON (secret
+   * `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS`). Read asynchronously; never logged. GA4 stays disabled until it is bound.
+   */
+  GOOGLE_OAUTH_CREDENTIALS?: SecretsStoreSecret;
+  /** Comma-separated approved numeric GA4 property IDs (non-secret). GA4 tools fail closed until set. */
+  GA4_PROPERTY_IDS?: string;
   /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`). Non-secret; owned by infra-config. */
   ACCESS_TEAM_DOMAIN?: string;
   /** AUD tag of the Access application protecting `/mcp`. Non-secret; owned by infra-config. */

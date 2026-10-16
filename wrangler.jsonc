@@ -24,6 +24,15 @@
       "id": "8677c23af5c14b43a460169f2f2cc93f"
     }
   ],
+  // Shared Google OAuth credential (authorized_user JSON) for GA4 and, later, Search Console. Secrets Store only; the
+  // value is never in this file. Store ID verified against the account's single default_secrets_store. See docs/ga4.md.
+  "secrets_store_secrets": [
+    {
+      "binding": "GOOGLE_OAUTH_CREDENTIALS",
+      "store_id": "a2a4a60a04b142d3a0c7d482542e67fc",
+      "secret_name": "ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS"
+    }
+  ],
   // Cloudflare Access origin validation (non-secret identifiers; the Access application is Terraform-managed in
   // firstsun-dev/infra-config). The Worker fails closed (503 on /mcp) until BOTH values are set. Fill them from
   // the infra-config outputs `anas_mcp_access_team_domain` / `anas_mcp_access_aud` as part of the coordinated
@@ -33,6 +42,9 @@
     "ACCESS_AUD": "1041a0fe23797ad6035a58c1f501544d853c8098bd5165c6b9c89174cad55327",
     // Approved Microsoft Clarity project_key allowlist (identifier, not a credential); must equal the Windmill variable
     // f/blog_analytics/clarity_project_key. Comma-separated for several projects. See docs/clarity.md.
-    "CLARITY_PROJECT_KEYS": "wrddojsfjm"
+    "CLARITY_PROJECT_KEYS": "wrddojsfjm",
+    // Approved GA4 numeric property IDs (identifiers, not credentials). With several IDs every GA4 tool call must pass
+    // `propertyId`. GA4 stays disabled until the GOOGLE_OAUTH_CREDENTIALS Secrets Store binding is also added. See docs/ga4.md.
+    "GA4_PROPERTY_IDS": "346676362,269121931"
   }
 }
