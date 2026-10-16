@@ -97,6 +97,25 @@ describe.skipIf(!ADMIN_URL)("Clarity PostgreSQL read model (real database)", () 
     await metric(acq, "proj-a", "acquisition", "Traffic", { totalSessionCount: "1" }, { source: null as never, hash: "a0" });
     await metric(acq, "proj-a", "acquisition", "Traffic", { totalSessionCount: "2" }, { source: "google", medium: "organic", channel: "Search", hash: "a1" });
     await metric(acq, "proj-a", "acquisition", "Traffic", { totalSessionCount: "3" }, { source: "bing", medium: "organic", channel: "Search", hash: "a2" });
+
+    // --- oversized datasets from otherwise successful ingestions (project proj-big).
+    const bulk = async (runId: string, query: string, n: number, dims: Parameters<typeof metric>[5]) => {
+      for (let i = 0; i < n; i++) await metric(runId, "proj-big", query, `M${String(i).padStart(4, "0")}`, { v: i }, { ...dims, hash: dims.hash });
+    };
+    const bigOverall = await run("proj-big", "site_overall", "success", "2026-10-15T00:30:00Z", { rows: 520 });
+    await bulk(bigOverall, "site_overall", 520, { hash: "o" });
+    // 1 page with 250 rows, plus 5 pages with 100 rows each (750 total > budget), plus small pages.
+    const bigPage = await run("proj-big", "page", "success", "2026-10-15T00:30:00Z", { rows: 760 });
+    await bulk(bigPage, "page", 250, { url: "/big/", hash: "pb" });
+    for (const k of ["/w1/", "/w2/", "/w3/", "/w4/", "/w5/"]) await bulk(bigPage, "page", 100, { url: k, hash: `p${k}` });
+    await metric(bigPage, "proj-big", "page", "Traffic", { totalSessionCount: "1" }, { url: "/z-small/", hash: "pz" });
+    const bigAcq = await run("proj-big", "acquisition", "success", "2026-10-15T00:30:00Z", { rows: 350 });
+    await bulk(bigAcq, "acquisition", 300, { source: "google", medium: "organic", channel: "Search", hash: "ag" });
+    await metric(bigAcq, "proj-big", "acquisition", "Traffic", { totalSessionCount: "1" }, { source: "zzz", hash: "az" });
+    const bigDev = await run("proj-big", "page_device", "success", "2026-10-15T00:30:00Z", { rows: 400 });
+    await bulk(bigDev, "page_device", 200, { url: "/big/", device: "Mobile", hash: "dm" });
+    await bulk(bigDev, "page_device", 200, { url: "/big/", device: "PC", hash: "dp" });
+    await bulk(bigDev, "page_device", 150, { url: "/big/", device: "Tablet", hash: "dt" });
   });
 
   afterAll(async () => {
@@ -106,7 +125,8 @@ describe.skipIf(!ADMIN_URL)("Clarity PostgreSQL read model (real database)", () 
   it("serves the newest successful site_overall run; newer failed/pending runs and other projects never leak in", async () => {
     const r = await repo().overview();
     expect(r.coverage.windowEnd).toBe("2026-10-15T00:30:00.000Z");
-    expect(r.coverage.complete).toBe(true);
+    expect(r.coverage.sourceComplete).toBe(true);
+    expect(r.responseComplete).toBe(true);
     expect(r.rows).toEqual([
       { metric: "Scroll Depth", values: { averageScrollDepth: 41.5 } },
       { metric: "Traffic", values: { totalSessionCount: "250", pagesPerSessionPercentage: null } },
@@ -124,8 +144,9 @@ describe.skipIf(!ADMIN_URL)("Clarity PostgreSQL read model (real database)", () 
   });
   it("pages: serves the newest (truncated) run flagged incomplete, ordered deterministically, never mixing the older run", async () => {
     const r = await repo().pages({ limit: 2, offset: 0 });
-    expect(r.truncated).toBe(true);
-    expect(r.coverage.complete).toBe(false);
+    expect(r.sourceTruncated).toBe(true);
+    expect(r.responseTruncated).toBe(false);
+    expect(r.coverage.sourceComplete).toBe(false);
     expect(r.rows.map((x) => x.page)).toEqual(["/about/", "/blog/a/"]);
     expect(r.hasMore).toBe(true);
     // Duplicate observations stay separate instead of being summed.
@@ -149,15 +170,79 @@ describe.skipIf(!ADMIN_URL)("Clarity PostgreSQL read model (real database)", () 
   it("page: normalizes the request and returns the device breakdown separately with its own coverage", async () => {
     const r = await repo().page({ page: "https://example.com/blog/a?utm_source=x" });
     expect(r.page).toBe("/blog/a/");
-    expect(r.observation?.truncated).toBe(true);
+    expect(r.observation?.sourceTruncated).toBe(true);
     expect(r.observation?.metrics.Traffic).toEqual([{ totalSessionCount: "3" }, { totalSessionCount: "4" }]);
     expect(r.breakdowns.device?.rows).toEqual([
-      { device: "Mobile", metrics: { Traffic: [{ totalSessionCount: "2" }] } },
-      { device: "PC", metrics: { Traffic: [{ totalSessionCount: "5" }] } },
+      { device: "Mobile", metrics: { Traffic: [{ totalSessionCount: "2" }] }, metricsTruncated: false, metricRowTotal: 1 },
+      { device: "PC", metrics: { Traffic: [{ totalSessionCount: "5" }] }, metricsTruncated: false, metricRowTotal: 1 },
     ]);
-    expect(r.breakdowns.device?.coverage.complete).toBe(true);
+    expect(r.breakdowns.device?.coverage.sourceComplete).toBe(true);
     expect(r.breakdowns.source).toBeNull();
     await expect(repo().page({ page: "/stale-only/" })).rejects.toMatchObject({ code: "data_unavailable" });
+  });
+  const BIG = ["proj-big"];
+  const count = (rows: { metrics: Record<string, unknown[]> }[]) => rows.reduce((n, r) => n + Object.values(r.metrics).reduce((m, v) => m + v.length, 0), 0);
+
+  it("overview: >500 rows from a successful ingestion is flagged responseTruncated, never sourceTruncated", async () => {
+    const r = await repo(BIG).overview();
+    expect(r.coverage.status).toBe("success");
+    expect(r.sourceTruncated).toBe(false);
+    expect(r.responseTruncated).toBe(true);
+    expect(r.responseComplete).toBe(false);
+    expect(r.rowCount).toBe(500);
+  });
+  it("pages: a single oversized page is bounded to the group cap and flagged with its true size", async () => {
+    const r = await repo(BIG).pages({ limit: 1, offset: 0, pagePrefix: "/big/" });
+    expect(r.rows).toHaveLength(1);
+    expect(count(r.rows)).toBe(100);
+    expect(r.rows[0]).toMatchObject({ page: "/big/", metricsTruncated: true, metricRowTotal: 250 });
+    // The retained prefix is deterministic (collation-independent order).
+    expect(Object.keys(r.rows[0].metrics)[0]).toBe("M0000");
+    expect(Object.keys(r.rows[0].metrics).at(-1)).toBe("M0099");
+    expect(r.responseTruncated).toBe(true);
+    expect(r.hasMore).toBe(false);
+    expect(r.sourceTruncated).toBe(false);
+  });
+  it("pages: pagination over a budget-exceeding group set is stable, gap-free and bounded per response", async () => {
+    const seen: string[] = [];
+    let offset = 0;
+    for (let i = 0; i < 20; i++) {
+      const r = await repo(BIG).pages({ limit: 100, offset });
+      expect(count(r.rows)).toBeLessThanOrEqual(500);
+      seen.push(...r.rows.map((x) => x.page));
+      if (!r.hasMore) {
+        expect(r.nextOffset).toBeNull();
+        break;
+      }
+      expect(r.responseTruncated).toBe(true); // shortened by budget -> never claims complete
+      expect(r.nextOffset).toBe(offset + r.rows.length);
+      offset = r.nextOffset!;
+    }
+    expect(seen).toEqual(["/big/", "/w1/", "/w2/", "/w3/", "/w4/", "/w5/", "/z-small/"]);
+    // The same walk twice yields the same order.
+    const again = await repo(BIG).pages({ limit: 100, offset: 0 });
+    expect(again.rows.map((x) => x.page)).toEqual(seen.slice(0, again.rows.length));
+  });
+  it("acquisition: an oversized cell is bounded and flagged; the next cell is still reachable", async () => {
+    const r = await repo(BIG).acquisition({ limit: 1, offset: 0 });
+    expect(r.rows[0]).toMatchObject({ source: "google", metricsTruncated: true, metricRowTotal: 300 });
+    expect(count(r.rows)).toBe(100);
+    expect(r.hasMore).toBe(true);
+    expect(r.nextOffset).toBe(1);
+    const next = await repo(BIG).acquisition({ limit: 1, offset: r.nextOffset! });
+    expect(next.rows[0]).toMatchObject({ source: "zzz", metricsTruncated: false, metricRowTotal: 1 });
+    expect(next.hasMore).toBe(false);
+  });
+  it("page: per-group caps and the overall cap flag the breakdown", async () => {
+    const r = await repo(BIG).page({ page: "/big/" });
+    const device = r.breakdowns.device!;
+    expect(device.rows.map((x) => x.device)).toEqual(["Mobile", "PC", "Tablet"]);
+    expect(device.rows.every((x) => x.metricsTruncated)).toBe(true);
+    expect(device.rows.map((x) => x.metricRowTotal)).toEqual([200, 200, 150]);
+    expect(device.responseTruncated).toBe(true);
+    expect(device.sourceTruncated).toBe(false);
+    expect(r.observation?.metricsTruncated ?? r.observation?.rows[0].metricsTruncated).toBe(true);
+    expect(r.responseComplete).toBe(false);
   });
   it("runs read-only: even a writable role cannot modify data through the runner's transaction", async () => {
     const runner = clarityHyperdriveRunner({ connectionString: ADMIN_URL } as unknown as Hyperdrive);

@@ -17,14 +17,15 @@ ORDER BY window_end_at DESC, fetched_at DESC, id DESC LIMIT 1
 
 - A newer failed/pending/rate-limited run is not eligible, so it cannot replace a valid dataset.
 - A newer run that normalized zero rows is not eligible (an empty observation is indistinguishable from an ingestion anomaly and must never read as zero traffic).
-- A `truncated` run is served, flagged `truncated: true` / `coverage.complete: false`; it is never presented as complete and an older `success` run is not substituted (the newest window wins; mixing runs is forbidden).
+- A `truncated` run is served, flagged `sourceTruncated: true` / `coverage.sourceComplete: false`; it is never presented as complete and an older `success` run is not substituted (the newest window wins; mixing runs is forbidden).
 - Rows are read only with `fetch_run_id = <selected> AND project_key AND query_key`. Different runs, windows, query keys and dimension breakdowns are never summed, merged or combined into totals; duplicate observations of the same page/metric stay separate array entries.
 - The run lookup and row lookups share one `REPEATABLE READ READ ONLY` snapshot.
 
 ## Semantics exposed to clients
 - `coverage.windowStart/windowEnd` = the requested rolling window; `freshness.dataThrough = windowEnd` (Clarity gives no stronger boundary; not the Taipei logical date). `freshness.stale` uses the same 72 h threshold as Bing.
 - `metric_values` is passed through unchanged. Units, field names and numeric formats are Clarity's and are not interpreted or converted; no GA4-compatible users/sessions are invented. Non-object JSONB becomes `null`.
-- `truncated` = source export ceiling reached; `hasMore` = another result page exists.
+- `sourceTruncated` = source export ceiling reached at ingestion (`coverage.status`/`coverage.sourceComplete` keep the ingestion state); `responseTruncated` = this response omitted rows/groups under local bounds; `responseComplete` = neither; `hasMore` = another result page exists (independent of both).
+- Bounded detail reads: page / acquisition / page-detail statements use `row_number() OVER (PARTITION BY <group> ORDER BY metric_name, row_hash)` with `rn <= $5` (MAX_GROUP_ROWS = 100) plus `LIMIT $6` (MAX_DETAIL_ROWS + 1 = 501) and `count(*) OVER (PARTITION BY <group>)` as the true group size. A group with fewer returned rows than its true size is flagged `metricsTruncated`. A missing/unparseable group size fails safe (flagged). For `clarity_pages`/`clarity_acquisition`, groups that would cut or exceed the 500-row budget are deferred whole and `nextOffset = offset + returned groups` provides a gap-free continuation. `clarity_overview` (unpaginated, tiny in practice) keeps the first 500 rows and flags `responseTruncated`. Alternative considered: failing with an explicit error on oversize; rejected because a flagged, deterministic prefix plus continuation is more useful and equally unambiguous.
 - No usable run -> `data_unavailable` ("does not mean there was no traffic").
 
 ## Project isolation

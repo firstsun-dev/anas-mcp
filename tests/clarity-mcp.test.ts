@@ -47,7 +47,7 @@ function healthy(text: string) {
   if (text.includes("GROUP BY url_normalized")) return [{ url_normalized: "/blog/a/" }];
   if (text.includes("GROUP BY dimension_hash")) return [{ dimension_hash: "h", source: "bing", medium: "organic", campaign: null, channel: null }];
   if (text.includes("FROM blog_analytics.clarity_metric_rows")) {
-    return [{ url_normalized: "/blog/a/", dimension_hash: "h", device: null, source: null, metric_name: "Traffic", metric_values: { totalSessionCount: "5" } }];
+    return [{ url_normalized: "/blog/a/", dimension_hash: "h", device: null, source: null, metric_name: "Traffic", metric_values: { totalSessionCount: "5" }, group_rows: "1" }];
   }
   return [];
 }
@@ -110,14 +110,14 @@ describe("clarity tools over MCP", () => {
     const r = await call("clarity_overview", {});
     expect(r.json.result.isError).toBeUndefined();
     const body = payload(r);
-    expect(body).toMatchObject({ projectKey: "proj-a", queryKey: "site_overall", truncated: false, rowCount: 1 });
-    expect(body.coverage.complete).toBe(true);
+    expect(body).toMatchObject({ projectKey: "proj-a", queryKey: "site_overall", sourceTruncated: false, responseTruncated: false, responseComplete: true, rowCount: 1 });
+    expect(body.coverage.sourceComplete).toBe(true);
     expect(JSON.parse(r.json.result.content[0].text)).toEqual(body);
     expect(db.statements[0]).toBe("BEGIN ISOLATION LEVEL REPEATABLE");
     expect(db.statements.at(-1)).toBe("COMMIT");
   });
   it("clarity_pages / clarity_acquisition / clarity_page return their shapes", async () => {
-    expect(payload(await call("clarity_pages", { limit: 5, pagePrefix: "/blog/" })).rows[0]).toEqual({ page: "/blog/a/", metrics: { Traffic: [{ totalSessionCount: "5" }] } });
+    expect(payload(await call("clarity_pages", { limit: 5, pagePrefix: "/blog/" })).rows[0]).toEqual({ page: "/blog/a/", metrics: { Traffic: [{ totalSessionCount: "5" }] }, metricsTruncated: false, metricRowTotal: 1 });
     expect(payload(await call("clarity_acquisition", {})).rows[0]).toMatchObject({ source: "bing", medium: "organic", campaign: null, channel: null });
     const page = payload(await call("clarity_page", { page: "/blog/a" }));
     expect(page.page).toBe("/blog/a/");

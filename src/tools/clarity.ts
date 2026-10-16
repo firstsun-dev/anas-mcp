@@ -35,7 +35,7 @@ function fail(error: unknown) {
 }
 
 const SEMANTICS_NOTE =
-  "Clarity data is an aggregate over a rolling window (coverage.windowStart..windowEnd), not a calendar-day or session warehouse. Windows from different runs overlap and are never summed; coverage.logicalDate is only a Taipei-local label. Metric values are passed through exactly as Clarity reported them (names, units and number formats are Clarity's); missing metrics are absent or null, never 0, and no data never means zero traffic. truncated=true means the source export hit its row ceiling and rows may be missing.";
+  "Clarity data is an aggregate over a rolling window (coverage.windowStart..windowEnd), not a calendar-day or session warehouse. Windows from different runs overlap and are never summed; coverage.logicalDate is only a Taipei-local label. Metric values are passed through exactly as Clarity reported them (names, units and number formats are Clarity's); missing metrics are absent or null, never 0, and no data never means zero traffic. sourceTruncated=true means the source export hit its row ceiling at ingestion and rows may be missing (coverage.status/sourceComplete keep the ingestion state). responseTruncated=true means THIS response omitted metric rows or pages because of local bounds (see metricsTruncated per row); it is independent of hasMore. responseComplete is true only when neither applies. When hasMore is true, continue with offset=nextOffset (not offset+limit).";
 
 export function registerClarityTools(server: McpServer, repository: ClarityAnalyticsRepository) {
   server.registerTool(

@@ -10,6 +10,7 @@
 - [x] `ClarityAnalyticsRepository` with canonical run selection, project allowlist, page normalization.
 - [x] Tools `clarity_overview`, `clarity_pages`, `clarity_acquisition`, `clarity_page` registered with read-only annotations.
 - [x] `health` reports `enabledSources` vs `plannedSources`.
+- [x] Gate 2: bounded per-group/overall detail SQL, `sourceTruncated` vs `responseTruncated` vs `responseComplete`, `metricsTruncated`/`metricRowTotal`, `nextOffset`; unit + real-SQL tests for >500-row ingestions and oversized single groups.
 - [x] No HTTP surface change; `openapi.yaml` untouched.
 
 ## Verification

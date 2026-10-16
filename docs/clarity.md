@@ -14,13 +14,23 @@ Clarity Data Export is an **aggregate rolling window**, not a session/event stor
 Until `CLARITY_PROJECT_KEYS` is set the tools return `missing_configuration` and `health` does not list `clarity` as enabled. The value must equal the Windmill variable `f/blog_analytics/clarity_project_key` (verify with `SELECT DISTINCT project_key FROM blog_analytics.clarity_fetch_runs`). To enable: add `"CLARITY_PROJECT_KEYS": "<verified key>"` to `vars` in `wrangler.jsonc` (and extend the `repo-guardrails` vars allowlist test) in a reviewed PR; deployment then follows the normal main-branch pipeline. It is an identifier, not a credential.
 
 ## Tools
-Common response fields: `projectKey`, `queryKey`, `freshness {fetchedAt, dataThrough, stale}`, `coverage {logicalDate, windowStart, windowEnd, numDays, status, complete, normalizerVersion}`, `rows`, `rowCount`, `truncated` (source export hit its 1000-row ceiling). `dataThrough` is the window end. `projectKey` is optional when exactly one project is approved.
+Common response fields: `projectKey`, `queryKey`, `freshness {fetchedAt, dataThrough, stale}`, `coverage {logicalDate, windowStart, windowEnd, numDays, status, sourceComplete, normalizerVersion}`, `rows`, `rowCount`, plus three completeness flags (see below). `dataThrough` is the window end. `projectKey` is optional when exactly one project is approved.
+
+### Source vs response completeness
+| Field | Meaning |
+| --- | --- |
+| `sourceTruncated` | The **ingestion** hit Clarity's 1000-row export ceiling; rows may be missing at the source. `coverage.status` keeps the original ingestion status (`success`/`truncated`) and `coverage.sourceComplete` is its boolean form. |
+| `responseTruncated` | **This response** omitted metric rows or whole pages/cells because of the local bounds below, even though ingestion succeeded. |
+| `responseComplete` | `true` only when neither of the above applies. Treat `false` as "do not present as complete". |
+| `hasMore` | Another result page exists. Independent of both truncation flags (a last page can be `responseTruncated`; a clean page can have `hasMore`). |
+
+Local bounds: at most 500 metric rows per tool call (`clarity_overview` keeps the first 500 rows) and at most 100 metric rows per page / acquisition cell / breakdown group. A group clipped by the per-group cap is returned with `metricsTruncated: true` and its real size in `metricRowTotal`, and the retained rows are the deterministic prefix in (`metric_name`, `row_hash`) order. For `clarity_pages` and `clarity_acquisition`, whole pages/cells that do not fit the 500-row budget are deferred (never half-returned): the response is shorter than `limit`, `responseTruncated` is `true`, `hasMore` is `true` and **`nextOffset`** is where to continue (`offset + rowCount`; use it rather than `offset + limit`). `nextOffset` is `null` when there is nothing more. `clarity_page` reports the same flags per section (`observation`, `breakdowns.device`, `breakdowns.source`) and aggregated at the top level. A clipped group is never reported as complete.
 
 | Tool | Input | Rows |
 | --- | --- | --- |
 | `clarity_overview` | `projectKey?` | `site_overall`: `{metric, values}` per metric |
-| `clarity_pages` | `limit` (1-100, default 25), `offset` (0-100000), `pagePrefix?`, `projectKey?` | `page`: `{page, metrics: {name: [values...]}}`, ordered by page path; `hasMore`, `offset` |
-| `clarity_acquisition` | `limit`, `offset`, `projectKey?` | `acquisition`: `{source, medium, campaign, channel, metrics}`; null attribution kept; nulls last |
+| `clarity_pages` | `limit` (1-100, default 25), `offset` (0-100000), `pagePrefix?`, `projectKey?` | `page`: `{page, metrics: {name: [values...]}, metricsTruncated, metricRowTotal}`, ordered by page path; `hasMore`, `offset`, `nextOffset` |
+| `clarity_acquisition` | `limit`, `offset`, `projectKey?` | `acquisition`: `{source, medium, campaign, channel, metrics, metricsTruncated, metricRowTotal}`; null attribution kept; nulls last; `hasMore`, `nextOffset` |
 | `clarity_page` | `page` (path or URL), `projectKey?` | `{page, observation, breakdowns: {device, source}}`, each with its own coverage, `null` when unavailable |
 
 `metrics[name]` is an array because the same normalized page can have several raw URL variants; entries are never merged. Canonical run selection is documented in the design.

@@ -41,8 +41,10 @@ export class ClarityAnalyticsError extends Error {
 export const DEFAULT_ROW_LIMIT = 25;
 export const MAX_ROW_LIMIT = 100;
 export const MAX_OFFSET = 100_000;
-/** Hard cap on metric rows returned for one summary/page lookup; truncation is reported, never silent. */
+/** Hard cap on metric rows returned by one tool call; anything beyond it is reported (responseTruncated), never silent. */
 export const MAX_DETAIL_ROWS = 500;
+/** Hard cap on metric rows read for ONE page / acquisition cell / breakdown group; a larger group is flagged metricsTruncated. */
+export const MAX_GROUP_ROWS = 100;
 
 export const QUERY_KEYS = ["site_overall", "page", "page_device", "acquisition", "technology", "geo_device", "page_source"] as const;
 export type ClarityQueryKey = (typeof QUERY_KEYS)[number];
@@ -183,11 +185,21 @@ const PAGE_KEYS_SQL = `
   ORDER BY url_normalized COLLATE "C"
   LIMIT $5 OFFSET $6`;
 
+// Detail reads are bounded twice: at most $5 rows per group (row_number) and at most $6 rows overall (LIMIT). group_rows
+// is the group's true size so a clipped group is always detectable. Order is total (row_hash tie-break), so the
+// retained prefix of a clipped group is deterministic.
 const PAGE_ROWS_SQL = `
-  SELECT url_normalized, metric_name, metric_values
-  FROM blog_analytics.clarity_metric_rows
-  WHERE fetch_run_id = $1 AND project_key = $2 AND query_key = $3 AND url_normalized = ANY($4::text[])
-  ORDER BY url_normalized COLLATE "C", metric_name COLLATE "C", row_hash COLLATE "C"`;
+  SELECT url_normalized, metric_name, metric_values, group_rows
+  FROM (
+    SELECT url_normalized, metric_name, metric_values,
+           row_number() OVER (PARTITION BY url_normalized ORDER BY metric_name COLLATE "C", row_hash COLLATE "C") AS rn,
+           count(*) OVER (PARTITION BY url_normalized) AS group_rows
+    FROM blog_analytics.clarity_metric_rows
+    WHERE fetch_run_id = $1 AND project_key = $2 AND query_key = $3 AND url_normalized = ANY($4::text[])
+  ) t
+  WHERE rn <= $5
+  ORDER BY url_normalized COLLATE "C", rn
+  LIMIT $6`;
 
 const ACQUISITION_KEYS_SQL = `
   SELECT dimension_hash, source, medium, campaign, channel
@@ -199,18 +211,31 @@ const ACQUISITION_KEYS_SQL = `
   LIMIT $4 OFFSET $5`;
 
 const ACQUISITION_ROWS_SQL = `
-  SELECT dimension_hash, metric_name, metric_values
-  FROM blog_analytics.clarity_metric_rows
-  WHERE fetch_run_id = $1 AND project_key = $2 AND query_key = $3 AND dimension_hash = ANY($4::text[])
-  ORDER BY dimension_hash COLLATE "C", metric_name COLLATE "C", row_hash COLLATE "C"`;
+  SELECT dimension_hash, metric_name, metric_values, group_rows
+  FROM (
+    SELECT dimension_hash, metric_name, metric_values,
+           row_number() OVER (PARTITION BY dimension_hash ORDER BY metric_name COLLATE "C", row_hash COLLATE "C") AS rn,
+           count(*) OVER (PARTITION BY dimension_hash) AS group_rows
+    FROM blog_analytics.clarity_metric_rows
+    WHERE fetch_run_id = $1 AND project_key = $2 AND query_key = $3 AND dimension_hash = ANY($4::text[])
+  ) t
+  WHERE rn <= $5
+  ORDER BY dimension_hash COLLATE "C", rn
+  LIMIT $6`;
 
 // One page, any of the page / page_device / page_source runs (the caller passes the query key).
 const PAGE_DETAIL_SQL = `
-  SELECT device, source, metric_name, metric_values
-  FROM blog_analytics.clarity_metric_rows
-  WHERE fetch_run_id = $1 AND project_key = $2 AND query_key = $3 AND url_normalized = ANY($4::text[])
-  ORDER BY device COLLATE "C" NULLS LAST, source COLLATE "C" NULLS LAST, metric_name COLLATE "C", row_hash COLLATE "C"
-  LIMIT $5`;
+  SELECT device, source, metric_name, metric_values, group_rows
+  FROM (
+    SELECT device, source, metric_name, metric_values,
+           row_number() OVER (PARTITION BY device, source ORDER BY metric_name COLLATE "C", row_hash COLLATE "C") AS rn,
+           count(*) OVER (PARTITION BY device, source) AS group_rows
+    FROM blog_analytics.clarity_metric_rows
+    WHERE fetch_run_id = $1 AND project_key = $2 AND query_key = $3 AND url_normalized = ANY($4::text[])
+  ) t
+  WHERE rn <= $5
+  ORDER BY device COLLATE "C" NULLS LAST, source COLLATE "C" NULLS LAST, rn
+  LIMIT $6`;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Result shapes
@@ -222,8 +247,8 @@ export interface Coverage {
   numDays: number | null;
   /** Ingestion status of the served run ('success' | 'truncated'). */
   status: string;
-  /** True only for a non-truncated 'success' run. */
-  complete: boolean;
+  /** SOURCE completeness: true only for a non-truncated 'success' run. Says nothing about local response truncation. */
+  sourceComplete: boolean;
   normalizerVersion: number | null;
 }
 
@@ -232,9 +257,60 @@ export interface RunMeta {
   queryKey: ClarityQueryKey;
   freshness: Freshness;
   coverage: Coverage;
-  /** The source dataset was cut off at Clarity's 1000-row export ceiling; rows may be missing. */
+  /** The source dataset was cut off at Clarity's 1000-row export ceiling at ingestion; rows may be missing. */
+  sourceTruncated: boolean;
+}
+
+/** Local response bounds, independent of ingestion state and of pagination (`hasMore`). */
+export interface ResponseMeta {
+  /** This response omits metric rows/groups because of MAX_GROUP_ROWS / MAX_DETAIL_ROWS. */
+  responseTruncated: boolean;
+  /** Effective completeness: the source run was complete AND nothing was omitted locally. */
+  responseComplete: boolean;
+}
+
+const responseMeta = (sourceTruncated: boolean, responseTruncated: boolean): ResponseMeta => ({
+  responseTruncated,
+  responseComplete: !sourceTruncated && !responseTruncated,
+});
+
+interface Group {
+  rows: Record<string, unknown>[];
+  /** True size of the group in the database. */
+  total: number;
+  /** Some of this group's metric rows are not in `rows`. */
   truncated: boolean;
 }
+
+/**
+ * Walks `keys` in order and keeps whole groups while they fit MAX_DETAIL_ROWS. The first group is always kept (it fits
+ * by construction). A later group that was cut off by the SQL LIMIT or would exceed the budget is deferred together
+ * with everything after it, so the caller can continue from `groups.length` instead of receiving a partial group.
+ */
+function packGroups(keys: string[], rows: Record<string, unknown>[], keyOf: (row: Record<string, unknown>) => string) {
+  const byKey = new Map<string, Record<string, unknown>[]>();
+  for (const row of rows) {
+    const k = keyOf(row);
+    const list = byKey.get(k);
+    if (list) list.push(row);
+    else byKey.set(k, [row]);
+  }
+  const hitLimit = rows.length > MAX_DETAIL_ROWS;
+  const groups: Group[] = [];
+  let used = 0;
+  for (const key of keys) {
+    const rowsOfKey = byKey.get(key) ?? [];
+    const total = rowsOfKey.length > 0 ? Number(rowsOfKey[0].group_rows) : 0;
+    const expected = Math.min(total, MAX_GROUP_ROWS);
+    const cut = rowsOfKey.length < expected || (rowsOfKey.length === 0 && hitLimit);
+    if (groups.length > 0 && (cut || used + rowsOfKey.length > MAX_DETAIL_ROWS)) return { groups, deferred: true };
+    groups.push({ rows: rowsOfKey, total, truncated: rowsOfKey.length === 0 || !(rowsOfKey.length >= total) });
+    used += rowsOfKey.length;
+  }
+  return { groups, deferred: false };
+}
+
+const groupInfo = (g: Group) => ({ metricsTruncated: g.truncated, metricRowTotal: g.total });
 
 /** metric name -> every ingested value object for it (usually exactly one; never summed). */
 export type MetricMap = Record<string, unknown[]>;
@@ -254,12 +330,6 @@ function addMetric(map: Map<string, unknown[]>, name: unknown, values: unknown) 
 }
 
 const toMetricMap = (map: Map<string, unknown[]>): MetricMap => Object.fromEntries(map);
-
-export interface PageBreakdown extends Omit<RunMeta, "projectKey" | "queryKey"> {
-  queryKey: ClarityQueryKey;
-  rows: { device?: string | null; source?: string | null; metrics: MetricMap }[];
-  rowCount: number;
-}
 
 export class ClarityAnalyticsRepository {
   constructor(
@@ -287,7 +357,7 @@ export class ClarityAnalyticsRepository {
     const meta = this.meta(projectKey, "site_overall", result.run);
     return {
       ...meta,
-      truncated: meta.truncated || result.rows.length > MAX_DETAIL_ROWS,
+      ...responseMeta(meta.sourceTruncated, result.rows.length > MAX_DETAIL_ROWS),
       rows: kept.map((row) => ({ metric: String(row.metric_name), values: asValues(row.metric_values) })),
       rowCount: kept.length,
     };
@@ -305,21 +375,25 @@ export class ClarityAnalyticsRepository {
         String(r.url_normalized),
       );
       const keys = found.slice(0, input.limit);
-      const rows = keys.length === 0 ? [] : (await session.query(PAGE_ROWS_SQL, [run.id, projectKey, "page", keys])).rows;
-      return { run, keys, hasMore: found.length > input.limit, rows };
+      const rows =
+        keys.length === 0
+          ? []
+          : (await session.query(PAGE_ROWS_SQL, [run.id, projectKey, "page", keys, MAX_GROUP_ROWS, MAX_DETAIL_ROWS + 1])).rows;
+      return { run, keys, moreKeys: found.length > input.limit, rows };
     });
     if (!result) throw new ClarityAnalyticsError("data_unavailable");
-    const byPage = new Map<string, Map<string, unknown[]>>(result.keys.map((k) => [k, new Map()]));
-    for (const row of result.rows) {
-      const metrics = byPage.get(String(row.url_normalized));
-      if (metrics) addMetric(metrics, row.metric_name, row.metric_values);
-    }
+    const { groups, deferred } = packGroups(result.keys, result.rows, (r) => String(r.url_normalized));
+    const meta = this.meta(projectKey, "page", result.run);
+    const hasMore = result.moreKeys || deferred;
     return {
-      ...this.meta(projectKey, "page", result.run),
-      rows: result.keys.map((page) => ({ page, metrics: toMetricMap(byPage.get(page)!) })),
-      rowCount: result.keys.length,
+      ...meta,
+      ...responseMeta(meta.sourceTruncated, deferred || groups.some((g) => g.truncated)),
+      rows: groups.map((g, i) => ({ page: result.keys[i], metrics: this.metricMap(g.rows), ...groupInfo(g) })),
+      rowCount: groups.length,
       offset: input.offset,
-      hasMore: result.hasMore,
+      hasMore,
+      // Continue here, not at offset+limit: a response shortened by the row budget has deferred whole pages.
+      nextOffset: hasMore ? input.offset + groups.length : null,
     };
   }
 
@@ -332,29 +406,40 @@ export class ClarityAnalyticsRepository {
       const found = (await session.query(ACQUISITION_KEYS_SQL, [run.id, projectKey, "acquisition", input.limit + 1, input.offset])).rows;
       const keys = found.slice(0, input.limit);
       const hashes = keys.map((k) => String(k.dimension_hash));
-      const rows = keys.length === 0 ? [] : (await session.query(ACQUISITION_ROWS_SQL, [run.id, projectKey, "acquisition", hashes])).rows;
-      return { run, keys, hasMore: found.length > input.limit, rows };
+      const rows =
+        keys.length === 0
+          ? []
+          : (await session.query(ACQUISITION_ROWS_SQL, [run.id, projectKey, "acquisition", hashes, MAX_GROUP_ROWS, MAX_DETAIL_ROWS + 1])).rows;
+      return { run, keys, moreKeys: found.length > input.limit, rows };
     });
     if (!result) throw new ClarityAnalyticsError("data_unavailable");
-    const byHash = new Map<string, Map<string, unknown[]>>(result.keys.map((k) => [String(k.dimension_hash), new Map()]));
-    for (const row of result.rows) {
-      const metrics = byHash.get(String(row.dimension_hash));
-      if (metrics) addMetric(metrics, row.metric_name, row.metric_values);
-    }
+    const { groups, deferred } = packGroups(
+      result.keys.map((k) => String(k.dimension_hash)),
+      result.rows,
+      (r) => String(r.dimension_hash),
+    );
     const text = (v: unknown) => (typeof v === "string" ? v : null);
+    const meta = this.meta(projectKey, "acquisition", result.run);
+    const hasMore = result.moreKeys || deferred;
     return {
-      ...this.meta(projectKey, "acquisition", result.run),
+      ...meta,
+      ...responseMeta(meta.sourceTruncated, deferred || groups.some((g) => g.truncated)),
       // null attribution (unknown/direct) is preserved as-is; Clarity labels are never mapped to GA4 channels.
-      rows: result.keys.map((k) => ({
-        source: text(k.source),
-        medium: text(k.medium),
-        campaign: text(k.campaign),
-        channel: text(k.channel),
-        metrics: toMetricMap(byHash.get(String(k.dimension_hash))!),
-      })),
-      rowCount: result.keys.length,
+      rows: groups.map((g, i) => {
+        const k = result.keys[i];
+        return {
+          source: text(k.source),
+          medium: text(k.medium),
+          campaign: text(k.campaign),
+          channel: text(k.channel),
+          metrics: this.metricMap(g.rows),
+          ...groupInfo(g),
+        };
+      }),
+      rowCount: groups.length,
       offset: input.offset,
-      hasMore: result.hasMore,
+      hasMore,
+      nextOffset: hasMore ? input.offset + groups.length : null,
     };
   }
 
@@ -370,7 +455,7 @@ export class ClarityAnalyticsRepository {
       const read = async (queryKey: ClarityQueryKey) => {
         const run = await this.selectRun(session, projectKey, queryKey);
         if (!run) return undefined;
-        const rows = (await session.query(PAGE_DETAIL_SQL, [run.id, projectKey, queryKey, candidates, MAX_DETAIL_ROWS + 1])).rows;
+        const rows = (await session.query(PAGE_DETAIL_SQL, [run.id, projectKey, queryKey, candidates, MAX_GROUP_ROWS, MAX_DETAIL_ROWS + 1])).rows;
         return { run, rows };
       };
       return { overall: await read("page"), device: await read("page_device"), source: await read("page_source") };
@@ -380,20 +465,32 @@ export class ClarityAnalyticsRepository {
       if (!part || part.rows.length === 0) return null;
       const { projectKey: _p, queryKey: _q, ...meta } = this.meta(projectKey, queryKey, part.run);
       const kept = part.rows.slice(0, MAX_DETAIL_ROWS);
-      const groups = new Map<string, { value: string | null; metrics: Map<string, unknown[]> }>();
+      const valueOf = (row: Record<string, unknown>) => (dimension && typeof row[dimension] === "string" ? (row[dimension] as string) : null);
+      const order: (string | null)[] = [];
+      const byGroup = new Map<string, Record<string, unknown>[]>();
       for (const row of kept) {
-        const value = dimension ? (typeof row[dimension] === "string" ? (row[dimension] as string) : null) : null;
+        const value = valueOf(row);
         const id = JSON.stringify(value);
-        let group = groups.get(id);
-        if (!group) groups.set(id, (group = { value, metrics: new Map() }));
-        addMetric(group.metrics, row.metric_name, row.metric_values);
+        if (!byGroup.has(id)) {
+          byGroup.set(id, []);
+          order.push(value);
+        }
+        byGroup.get(id)!.push(row);
       }
+      const groups = order.map((value) => {
+        const rows = byGroup.get(JSON.stringify(value))!;
+        const total = Number(rows[0].group_rows);
+        // A group is incomplete when it was clipped by the per-group cap or cut by the overall budget.
+        return { value, rows, total, truncated: !(rows.length >= total) };
+      });
+      // Groups beyond the overall budget are not enumerable here, so exceeding it flags the whole section.
+      const responseTruncated = part.rows.length > MAX_DETAIL_ROWS || groups.some((g) => g.truncated);
       return {
         queryKey,
         ...meta,
-        truncated: meta.truncated || part.rows.length > MAX_DETAIL_ROWS,
-        rows: [...groups.values()].map((g) => ({ ...(dimension ? { [dimension]: g.value } : {}), metrics: toMetricMap(g.metrics) })),
-        rowCount: groups.size,
+        ...responseMeta(meta.sourceTruncated, responseTruncated),
+        rows: groups.map((g) => ({ ...(dimension ? { [dimension]: g.value } : {}), metrics: this.metricMap(g.rows), ...groupInfo(g) })),
+        rowCount: groups.length,
       };
     };
 
@@ -406,12 +503,25 @@ export class ClarityAnalyticsRepository {
         "No Clarity observation for this page in the latest usable ingestion. The page may be absent from the window or cut off by truncation; this does not mean zero traffic.",
       );
     }
+    const sections = [overall, device, source].filter((s) => s !== null);
     return {
       projectKey,
       page,
+      // Aggregates over the returned sections; per-section flags carry the detail.
+      sourceTruncated: sections.some((s) => s.sourceTruncated),
+      ...responseMeta(
+        sections.some((s) => s.sourceTruncated),
+        sections.some((s) => s.responseTruncated),
+      ),
       observation: overall ? { ...overall, metrics: overall.rows[0]?.metrics ?? {} } : null,
       breakdowns: { device, source },
     };
+  }
+
+  private metricMap(rows: Record<string, unknown>[]): MetricMap {
+    const map = new Map<string, unknown[]>();
+    for (const row of rows) addMetric(map, row.metric_name, row.metric_values);
+    return toMetricMap(map);
   }
 
   private resolveProject(requested: string | undefined): string {
@@ -447,10 +557,10 @@ export class ClarityAnalyticsRepository {
           windowEnd,
           numDays: int(row.num_days),
           status,
-          complete: status === "success" && !truncated,
+          sourceComplete: status === "success" && !truncated,
           normalizerVersion: int(row.normalizer_version),
         },
-        truncated,
+        sourceTruncated: truncated,
       },
     };
   }
