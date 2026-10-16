@@ -30,6 +30,9 @@
   // rollout (see docs/cloudflare-access.md). These are not credentials; never put secrets in `vars`.
   "vars": {
     "ACCESS_TEAM_DOMAIN": "firstsun.cloudflareaccess.com",
-    "ACCESS_AUD": "1041a0fe23797ad6035a58c1f501544d853c8098bd5165c6b9c89174cad55327"
+    "ACCESS_AUD": "1041a0fe23797ad6035a58c1f501544d853c8098bd5165c6b9c89174cad55327",
+    // Approved Microsoft Clarity project_key allowlist (identifier, not a credential); must equal the Windmill variable
+    // f/blog_analytics/clarity_project_key. Comma-separated for several projects. See docs/clarity.md.
+    "CLARITY_PROJECT_KEYS": "wrddojsfjm"
   }
 }

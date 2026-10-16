@@ -39,10 +39,10 @@ describe("repository guardrails", () => {
     expect(code).not.toMatch(/clarity\.ms|project-live-insights|clarity_api_token/i);
     expect(code).not.toMatch(/raw_payload/);
   });
-  it("wrangler.jsonc has only non-secret Access vars, no Secrets Store bindings, and the ANALYTICS_DB Hyperdrive binding", () => {
+  it("wrangler.jsonc has only non-secret Access/Clarity vars, no Secrets Store bindings, and the ANALYTICS_DB Hyperdrive binding", () => {
     const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;
     expect(config.secrets_store_secrets).toBeUndefined();
-    expect(Object.keys(config.vars ?? {}).sort()).toEqual(["ACCESS_AUD", "ACCESS_TEAM_DOMAIN"]);
+    expect(Object.keys(config.vars ?? {}).sort()).toEqual(["ACCESS_AUD", "ACCESS_TEAM_DOMAIN", "CLARITY_PROJECT_KEYS"]);
     expect(config.hyperdrive).toEqual([expect.objectContaining({ binding: "ANALYTICS_DB" })]);
     expect(JSON.stringify(config)).not.toMatch(/bing|apikey|postgres(ql)?:\/\//i);
   });
