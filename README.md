@@ -26,8 +26,8 @@ createMcpHandler() --> read-only analytics tools
 
 - **HTTP API contract:** repository-root `openapi.yaml` uses OpenAPI 3.2.0 and is intended for Swagger-compatible tooling. It documents the HTTP surface; MCP tools remain MCP-native schemas rather than fake REST endpoints.
 - **MCP authentication:** production `/mcp` is protected by one Cloudflare Access application that concurrently accepts **Mode A, Managed OAuth** (interactive clients such as ChatGPT) and **Mode B, Access Service Token** (headless agents). The Worker validates `Cf-Access-Jwt-Assertion` before any MCP/tool/database work. `/health` stays public and minimal. Cloudflare configuration is owned by `firstsun-dev/infra-config`.
-- **Search Console:** direct Search Console API queries.
-- **Clarity:** read normalized PostgreSQL data populated by `firstsun-dev/windmill-flows`; this service never calls the Clarity API directly. Tools: `clarity_overview`, `clarity_pages`, `clarity_acquisition`, `clarity_page` (see `docs/clarity.md`; needs the `CLARITY_PROJECT_KEYS` var). `health` lists `enabledSources` and `plannedSources` (Search Console is still planned).
+- **Search Console:** direct Search Console API queries with the shared Google OAuth credential and the non-secret `GSC_ALLOWED_SITES` property allowlist. Tools: `gsc_list_sites`, `gsc_search_analytics` (see `docs/gsc.md`). Fail-closed if `GSC_ALLOWED_SITES` is missing or malformed; configured identifiers are not yet verified against the Google account.
+- **Clarity:** read normalized PostgreSQL data populated by `firstsun-dev/windmill-flows`; this service never calls the Clarity API directly. Tools: `clarity_overview`, `clarity_pages`, `clarity_acquisition`, `clarity_page` (see `docs/clarity.md`; needs the `CLARITY_PROJECT_KEYS` var). `health` lists `enabledSources` and `plannedSources`.
 - **GA4:** read through the Google Analytics Data API with the shared Google OAuth credential (Secrets Store binding `GOOGLE_OAUTH_CREDENTIALS`, secret `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS`) and the non-secret `GA4_PROPERTY_IDS` allowlist. Tools: `ga4_overview`, `ga4_pages` (`groupBy` `path` default / `fullUrl`), `ga4_acquisition`, `ga4_run_report` (see `docs/ga4.md`). Disabled and fail-closed until both are configured.
 - **Credentials:** Secrets Store first. Any long-lived secret consumed directly by this Worker should come from Cloudflare Secrets Store whenever supported.
 - **Google OAuth:** one JSON credential stored in Cloudflare Secrets Store.
@@ -38,6 +38,7 @@ See:
 
 - `openapi.yaml` and `docs/api.md` for the HTTP/OpenAPI contract
 - `docs/mcp-authentication.md` and `docs/cloudflare-access.md` for dual-mode Access authentication, client setup, and rollout
+- `docs/gsc.md` for the Search Console tools, data caveats and operator checklist
 - `docs/clarity.md` for the Clarity tools, data semantics and configuration
 - `docs/credentials.md` for credential ownership/storage policy
 - `docs/cicd.md` for centralized deployment policy and caller-workflow contract

@@ -24,7 +24,7 @@
       "id": "8677c23af5c14b43a460169f2f2cc93f"
     }
   ],
-  // Shared Google OAuth credential (authorized_user JSON) for GA4 and, later, Search Console. Secrets Store only; the
+  // Shared Google OAuth credential (authorized_user JSON) for GA4 and Search Console. Secrets Store only; the
   // value is never in this file. Store ID verified against the account's single default_secrets_store. See docs/ga4.md.
   "secrets_store_secrets": [
     {
@@ -45,6 +45,9 @@
     "CLARITY_PROJECT_KEYS": "wrddojsfjm",
     // Approved GA4 numeric property IDs (identifiers, not credentials). With several IDs every GA4 tool call must pass
     // `propertyId`. GA4 stays disabled until the GOOGLE_OAUTH_CREDENTIALS Secrets Store binding is also added. See docs/ga4.md.
-    "GA4_PROPERTY_IDS": "346676362,269121931"
+    "GA4_PROPERTY_IDS": "346676362,269121931",
+    // Approved Search Console property identifiers (non-secret JSON string array, exact values as shown in Search Console;
+    // a URL-prefix property is never widened to its domain). Malformed value disables Search Console. See docs/gsc.md.
+    "GSC_ALLOWED_SITES": "[\"https://firstsun.heavenfortress.com/\",\"sc-domain:heavenfortress.com\"]"
   }
 }

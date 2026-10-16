@@ -24,6 +24,11 @@ export interface Env {
   GOOGLE_OAUTH_CREDENTIALS?: SecretsStoreSecret;
   /** Comma-separated approved numeric GA4 property IDs (non-secret). GA4 tools fail closed until set. */
   GA4_PROPERTY_IDS?: string;
+  /**
+   * JSON string array of exact Search Console property identifiers (non-secret), e.g. `["https://example.com/",
+   * "sc-domain:example.org"]`. Search Console tools fail closed until it is set and valid.
+   */
+  GSC_ALLOWED_SITES?: string;
   /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`). Non-secret; owned by infra-config. */
   ACCESS_TEAM_DOMAIN?: string;
   /** AUD tag of the Access application protecting `/mcp`. Non-secret; owned by infra-config. */

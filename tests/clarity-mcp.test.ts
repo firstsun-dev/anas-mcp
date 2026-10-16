@@ -73,6 +73,8 @@ describe("tool registration and health", () => {
       "ga4_overview",
       "ga4_pages",
       "ga4_run_report",
+      "gsc_list_sites",
+      "gsc_search_analytics",
       "health",
     ]);
     for (const t of tools.filter((t: any) => t.name.startsWith("clarity_"))) {
