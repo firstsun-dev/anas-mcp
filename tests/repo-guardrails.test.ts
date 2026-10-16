@@ -25,10 +25,19 @@ describe("repository guardrails", () => {
     expect(code).not.toMatch(/SubmitUrl|SubmitSitemap|AddSite|RemoveSite|VerifySite|RemoveSitemap|GetUrlInfo/);
   });
   it("only fixed read-only statements are used against PostgreSQL (no writes, no generic SQL entry point)", () => {
-    const service = stripComments(read("src/services/bing-analytics.ts"));
-    expect(service).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT)\b\s/i);
-    expect(service).toMatch(/READ ONLY/);
-    expect(service).not.toMatch(/export\s+(async\s+)?function\s+(executeSql|rawQuery)/);
+    for (const file of ["src/services/bing-analytics.ts", "src/services/clarity-analytics.ts", "src/services/sql-session.ts"]) {
+      const service = stripComments(read(file));
+      expect(service, file).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT)\b\s/i);
+      expect(service, file).not.toMatch(/export\s+(async\s+)?function\s+(executeSql|rawQuery)/);
+    }
+    // The shared runner is the single place sessions are opened, and it is always read-only.
+    expect(stripComments(read("src/services/sql-session.ts"))).toMatch(/READ ONLY/);
+    expect(stripComments(read("src/services/clarity-analytics.ts"))).not.toMatch(/from "pg"/);
+  });
+  it("the Worker never calls Microsoft Clarity and never reads the stored raw payload", () => {
+    const code = stripComments(allSource());
+    expect(code).not.toMatch(/clarity\.ms|project-live-insights|clarity_api_token/i);
+    expect(code).not.toMatch(/raw_payload/);
   });
   it("wrangler.jsonc has only non-secret Access vars, no Secrets Store bindings, and the ANALYTICS_DB Hyperdrive binding", () => {
     const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;

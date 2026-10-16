@@ -37,10 +37,10 @@ beforeEach(() => {
 });
 
 describe("MCP tool registration", () => {
-  it("lists exactly health, bing_list_sites, bing_search_performance", async () => {
+  it("lists health and the Bing tools beside the Clarity tools", async () => {
     const r = await mcpCall(env, "tools/list");
     const tools = r.json.result.tools;
-    expect(tools.map((t: any) => t.name).sort()).toEqual(["bing_list_sites", "bing_search_performance", "health"]);
+    expect(tools.map((t: any) => t.name).sort()).toEqual(["bing_list_sites", "bing_search_performance", "clarity_acquisition", "clarity_overview", "clarity_page", "clarity_pages", "health"]);
     for (const t of tools.filter((t: any) => t.name.startsWith("bing_"))) expect(t.annotations.readOnlyHint).toBe(true);
   });
   it("exposes no bing_url_info, write, or generic SQL tools", async () => {

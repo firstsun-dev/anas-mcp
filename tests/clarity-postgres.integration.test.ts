@@ -1,0 +1,174 @@
+// Runs the real SQL against PostgreSQL with windmill-flows' Clarity migration applied (tests/fixtures/clarity-schema.sql).
+//   CLARITY_TEST_DATABASE_URL=postgres://postgres:pw@localhost:55432/postgres pnpm test
+// Skipped when the variable is unset. It DROPS and recreates schema blog_analytics, so point it only at a throwaway
+// database. A SELECT-only role proves the Hyperdrive user needs no write privileges.
+import { readFileSync } from "node:fs";
+import { Client } from "pg";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ClarityAnalyticsRepository, clarityHyperdriveRunner } from "../src/services/clarity-analytics";
+
+const ADMIN_URL = process.env.CLARITY_TEST_DATABASE_URL;
+const RO_ROLE = "clarity_test_reader";
+const RO_PASSWORD = "clarity-test-reader-pw";
+
+describe.skipIf(!ADMIN_URL)("Clarity PostgreSQL read model (real database)", () => {
+  let admin: Client;
+  let readerUrl: string;
+  const now = new Date("2026-10-16T06:00:00Z");
+  const repo = (keys = ["proj-a"]) =>
+    new ClarityAnalyticsRepository(clarityHyperdriveRunner({ connectionString: readerUrl } as unknown as Hyperdrive), keys, () => now, () => undefined);
+
+  let attempt = 0;
+  async function run(project: string, query: string, status: string, windowEnd: string | null, opts: { rows?: number; truncated?: boolean; days?: number } = {}) {
+    const days = opts.days ?? 1;
+    const { rows } = await admin.query(
+      `INSERT INTO blog_analytics.clarity_fetch_runs
+         (project_key, query_key, scheduled_at, fetched_at, num_days, window_start_at, window_end_at, logical_date,
+          attempt_no, status, row_count, truncated_suspected)
+       VALUES ($1, $2, $3::timestamptz, CASE WHEN $4::text = 'pending' THEN NULL ELSE $3::timestamptz END, $5::int,
+               $3::timestamptz - make_interval(days => $5::int), $3::timestamptz, ($3::timestamptz AT TIME ZONE 'Asia/Taipei')::date,
+               $6::int, $4::text, $7::int, $8::boolean)
+       RETURNING id`,
+      [project, query, windowEnd, status, days, ++attempt, opts.rows ?? null, opts.truncated ?? false],
+    );
+    return rows[0].id as string;
+  }
+  async function metric(
+    runId: string,
+    project: string,
+    query: string,
+    name: string,
+    values: unknown,
+    dims: { url?: string; device?: string; source?: string; medium?: string; channel?: string; hash?: string } = {},
+  ) {
+    await admin.query(
+      `INSERT INTO blog_analytics.clarity_metric_rows
+         (fetch_run_id, project_key, query_key, logical_date, metric_name, device, source, medium, channel, url_normalized,
+          dimension_hash, row_hash, metric_values, normalizer_version)
+       VALUES ($1, $2, $3, '2026-10-15', $4, $5, $6, $7, $8, $9, $10, md5($11::text), $11::jsonb, 1)`,
+      [runId, project, query, name, dims.device ?? null, dims.source ?? null, dims.medium ?? null, dims.channel ?? null, dims.url ?? null, dims.hash ?? "none", JSON.stringify(values)],
+    );
+  }
+
+  beforeAll(async () => {
+    admin = new Client({ connectionString: ADMIN_URL });
+    await admin.connect();
+    await admin.query("DROP SCHEMA IF EXISTS blog_analytics CASCADE");
+    await admin.query(readFileSync(new URL("./fixtures/clarity-schema.sql", import.meta.url), "utf8"));
+    await admin.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${RO_ROLE}') THEN CREATE ROLE ${RO_ROLE} LOGIN PASSWORD '${RO_PASSWORD}'; END IF; END $$`);
+    await admin.query(`GRANT USAGE ON SCHEMA blog_analytics TO ${RO_ROLE}`);
+    await admin.query(
+      `GRANT SELECT ON blog_analytics.clarity_fetch_runs, blog_analytics.clarity_metric_rows, blog_analytics.clarity_query_definitions TO ${RO_ROLE}`,
+    );
+    const u = new URL(ADMIN_URL!);
+    u.username = RO_ROLE;
+    u.password = RO_PASSWORD;
+    readerUrl = u.toString();
+
+    // --- site_overall: an older success, a newer success, a newer failure, and a pending run; plus another project.
+    const old = await run("proj-a", "site_overall", "success", "2026-10-14T00:30:00Z", { rows: 1 });
+    await metric(old, "proj-a", "site_overall", "Traffic", { totalSessionCount: "100" });
+    const good = await run("proj-a", "site_overall", "success", "2026-10-15T00:30:00Z", { rows: 2 });
+    await metric(good, "proj-a", "site_overall", "Traffic", { totalSessionCount: "250", pagesPerSessionPercentage: null });
+    await metric(good, "proj-a", "site_overall", "Scroll Depth", { averageScrollDepth: 41.5 });
+    await run("proj-a", "site_overall", "fetch_failed", "2026-10-16T00:30:00Z");
+    await run("proj-a", "site_overall", "pending", "2026-10-16T00:40:00Z");
+    const other = await run("proj-b", "site_overall", "success", "2026-10-16T00:30:00Z", { rows: 1 });
+    await metric(other, "proj-b", "site_overall", "Traffic", { totalSessionCount: "999999" });
+
+    // --- page: newest run is truncated; two raw variants of /blog/a/ collapse to one identity.
+    const page = await run("proj-a", "page", "truncated", "2026-10-15T00:30:00Z", { rows: 4, truncated: true });
+    await metric(page, "proj-a", "page", "Traffic", { totalSessionCount: "3" }, { url: "/blog/a/", hash: "u1" });
+    await metric(page, "proj-a", "page", "Traffic", { totalSessionCount: "4" }, { url: "/blog/a/", hash: "u2" });
+    await metric(page, "proj-a", "page", "Scroll Depth", { averageScrollDepth: 50 }, { url: "/blog/a/", hash: "u1" });
+    await metric(page, "proj-a", "page", "Traffic", { totalSessionCount: "8" }, { url: "/blog/b/", hash: "u3" });
+    await metric(page, "proj-a", "page", "Traffic", { totalSessionCount: "9" }, { url: "/about/", hash: "u4" });
+    const pageOld = await run("proj-a", "page", "success", "2026-10-13T00:30:00Z", { rows: 1 });
+    await metric(pageOld, "proj-a", "page", "Traffic", { totalSessionCount: "1" }, { url: "/stale-only/", hash: "u9" });
+
+    const pdev = await run("proj-a", "page_device", "success", "2026-10-15T00:30:00Z", { rows: 2 });
+    await metric(pdev, "proj-a", "page_device", "Traffic", { totalSessionCount: "2" }, { url: "/blog/a/", device: "Mobile", hash: "d1" });
+    await metric(pdev, "proj-a", "page_device", "Traffic", { totalSessionCount: "5" }, { url: "/blog/a/", device: "PC", hash: "d2" });
+
+    // --- acquisition: newest run has zero rows (unusable) -> falls back; null attribution sorts last.
+    await run("proj-a", "acquisition", "success", "2026-10-16T00:30:00Z", { rows: 0 });
+    const acq = await run("proj-a", "acquisition", "success", "2026-10-15T00:30:00Z", { rows: 3 });
+    await metric(acq, "proj-a", "acquisition", "Traffic", { totalSessionCount: "1" }, { source: null as never, hash: "a0" });
+    await metric(acq, "proj-a", "acquisition", "Traffic", { totalSessionCount: "2" }, { source: "google", medium: "organic", channel: "Search", hash: "a1" });
+    await metric(acq, "proj-a", "acquisition", "Traffic", { totalSessionCount: "3" }, { source: "bing", medium: "organic", channel: "Search", hash: "a2" });
+  });
+
+  afterAll(async () => {
+    await admin?.end();
+  });
+
+  it("serves the newest successful site_overall run; newer failed/pending runs and other projects never leak in", async () => {
+    const r = await repo().overview();
+    expect(r.coverage.windowEnd).toBe("2026-10-15T00:30:00.000Z");
+    expect(r.coverage.complete).toBe(true);
+    expect(r.rows).toEqual([
+      { metric: "Scroll Depth", values: { averageScrollDepth: 41.5 } },
+      { metric: "Traffic", values: { totalSessionCount: "250", pagesPerSessionPercentage: null } },
+    ]);
+    // 250 only: older run (100) is not added; project B (999999) never appears.
+    expect(JSON.stringify(r)).not.toMatch(/"100"|999999/);
+    expect(r.freshness.dataThrough).toBe("2026-10-15T00:30:00.000Z");
+    expect(r.freshness.stale).toBe(false);
+  });
+  it("isolates projects by allowlist", async () => {
+    const b = await repo(["proj-b"]).overview();
+    expect(b.rows).toEqual([{ metric: "Traffic", values: { totalSessionCount: "999999" } }]);
+    await expect(repo(["proj-b"]).overview({ projectKey: "proj-a" })).rejects.toMatchObject({ code: "validation" });
+    await expect(repo(["proj-c"]).overview()).rejects.toMatchObject({ code: "data_unavailable" });
+  });
+  it("pages: serves the newest (truncated) run flagged incomplete, ordered deterministically, never mixing the older run", async () => {
+    const r = await repo().pages({ limit: 2, offset: 0 });
+    expect(r.truncated).toBe(true);
+    expect(r.coverage.complete).toBe(false);
+    expect(r.rows.map((x) => x.page)).toEqual(["/about/", "/blog/a/"]);
+    expect(r.hasMore).toBe(true);
+    // Duplicate observations stay separate instead of being summed.
+    expect(r.rows[1].metrics.Traffic).toEqual([{ totalSessionCount: "3" }, { totalSessionCount: "4" }]);
+    const next = await repo().pages({ limit: 2, offset: 2 });
+    expect(next.rows.map((x) => x.page)).toEqual(["/blog/b/"]);
+    expect(next.hasMore).toBe(false);
+    expect(JSON.stringify([r, next])).not.toContain("stale-only");
+  });
+  it("pages: prefix filter is literal (LIKE wildcards are not interpreted)", async () => {
+    expect((await repo().pages({ limit: 10, offset: 0, pagePrefix: "/blog/" })).rows.map((x) => x.page)).toEqual(["/blog/a/", "/blog/b/"]);
+    expect((await repo().pages({ limit: 10, offset: 0, pagePrefix: "/%" })).rows).toEqual([]);
+    expect((await repo().pages({ limit: 10, offset: 0, pagePrefix: "/b_og/" })).rows).toEqual([]);
+  });
+  it("acquisition: skips an empty newest run, preserves null attribution, orders nulls last", async () => {
+    const r = await repo().acquisition({ limit: 10, offset: 0 });
+    expect(r.coverage.windowEnd).toBe("2026-10-15T00:30:00.000Z");
+    expect(r.rows.map((x) => x.source)).toEqual(["bing", "google", null]);
+    expect(r.rows[2]).toMatchObject({ medium: null, channel: null, campaign: null });
+  });
+  it("page: normalizes the request and returns the device breakdown separately with its own coverage", async () => {
+    const r = await repo().page({ page: "https://example.com/blog/a?utm_source=x" });
+    expect(r.page).toBe("/blog/a/");
+    expect(r.observation?.truncated).toBe(true);
+    expect(r.observation?.metrics.Traffic).toEqual([{ totalSessionCount: "3" }, { totalSessionCount: "4" }]);
+    expect(r.breakdowns.device?.rows).toEqual([
+      { device: "Mobile", metrics: { Traffic: [{ totalSessionCount: "2" }] } },
+      { device: "PC", metrics: { Traffic: [{ totalSessionCount: "5" }] } },
+    ]);
+    expect(r.breakdowns.device?.coverage.complete).toBe(true);
+    expect(r.breakdowns.source).toBeNull();
+    await expect(repo().page({ page: "/stale-only/" })).rejects.toMatchObject({ code: "data_unavailable" });
+  });
+  it("runs read-only: even a writable role cannot modify data through the runner's transaction", async () => {
+    const runner = clarityHyperdriveRunner({ connectionString: ADMIN_URL } as unknown as Hyperdrive);
+    await expect(runner((s) => s.query("DELETE FROM blog_analytics.clarity_metric_rows"))).rejects.toMatchObject({ code: "25006" });
+    const { rows } = await admin.query("SELECT count(*)::int AS n FROM blog_analytics.clarity_metric_rows");
+    expect(rows[0].n).toBeGreaterThan(0);
+  });
+  it("the SELECT-only role is sufficient (no base-table writes needed)", async () => {
+    const reader = new Client({ connectionString: readerUrl });
+    await reader.connect();
+    await expect(reader.query("DELETE FROM blog_analytics.clarity_metric_rows")).rejects.toMatchObject({ code: "42501" });
+    await reader.end();
+  });
+});

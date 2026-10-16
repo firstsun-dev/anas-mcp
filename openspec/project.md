@@ -179,5 +179,5 @@ MCP tool contracts
 6. GA4 generic report, realtime, and metadata tools.
 7. Search Console analytics, URL inspection, and site-list tools.
 8. Windmill-ingested, Hyperdrive-backed Bing Webmaster site-list and search-performance tools.
-9. Hyperdrive-backed Clarity overview/page tools.
+9. Hyperdrive-backed Clarity overview/page/acquisition tools (`add-clarity-analytics-tools`).
 10. Cross-source analytical workflows only after repeated usage patterns justify dedicated tools.

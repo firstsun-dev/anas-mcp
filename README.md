@@ -28,7 +28,7 @@ createMcpHandler() --> read-only analytics tools
 - **MCP authentication:** production `/mcp` is protected by one Cloudflare Access application that concurrently accepts **Mode A, Managed OAuth** (interactive clients such as ChatGPT) and **Mode B, Access Service Token** (headless agents). The Worker validates `Cf-Access-Jwt-Assertion` before any MCP/tool/database work. `/health` stays public and minimal. Cloudflare configuration is owned by `firstsun-dev/infra-config`.
 - **GA4:** direct Google Analytics Data API queries.
 - **Search Console:** direct Search Console API queries.
-- **Clarity:** read normalized PostgreSQL data populated by `firstsun-dev/windmill-flows`; this service never calls the Clarity API directly.
+- **Clarity:** read normalized PostgreSQL data populated by `firstsun-dev/windmill-flows`; this service never calls the Clarity API directly. Tools: `clarity_overview`, `clarity_pages`, `clarity_acquisition`, `clarity_page` (see `docs/clarity.md`; needs the `CLARITY_PROJECT_KEYS` var). `health` lists `enabledSources` and `plannedSources` (GA4 and Search Console are still planned).
 - **Credentials:** Secrets Store first. Any long-lived secret consumed directly by this Worker should come from Cloudflare Secrets Store whenever supported.
 - **Google OAuth:** one JSON credential stored in Cloudflare Secrets Store.
 - **Database:** read-only PostgreSQL access through Cloudflare Hyperdrive; the database password remains managed by Hyperdrive and is not duplicated into Worker secrets.
@@ -38,6 +38,7 @@ See:
 
 - `openapi.yaml` and `docs/api.md` for the HTTP/OpenAPI contract
 - `docs/mcp-authentication.md` and `docs/cloudflare-access.md` for dual-mode Access authentication, client setup, and rollout
+- `docs/clarity.md` for the Clarity tools, data semantics and configuration
 - `docs/credentials.md` for credential ownership/storage policy
 - `docs/cicd.md` for centralized deployment policy and caller-workflow contract
 
@@ -54,7 +55,7 @@ POST /mcp
 
 Use Swagger-compatible OpenAPI 3.2 tooling to inspect/render the contract.
 
-Do not represent MCP tools such as future `ga4_run_report`, `gsc_search_analytics`, or `clarity_page` as fake REST routes. Those contracts belong to MCP tool schemas and are discovered through MCP.
+Do not represent MCP tools such as `clarity_page`, future `ga4_run_report`, or `gsc_search_analytics` as fake REST routes. Those contracts belong to MCP tool schemas and are discovered through MCP.
 
 Any change to an HTTP route, method, authentication requirement, status code, content type, or stable payload must update `openapi.yaml` in the same change.
 
