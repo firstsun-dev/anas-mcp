@@ -279,6 +279,36 @@ describe("client: provider errors, retries and limits", () => {
     expect(le.retryAfterSeconds).toBe(120);
     expect(long.sleeps).toEqual([]);
   });
+  it("honors a 5xx Retry-After exactly when within budget (2 s and 5 s), never shortening it", async () => {
+    for (const seconds of [2, 5]) {
+      const t = setup([() => googleError(503, {}, { "retry-after": String(seconds) }), queryOk]);
+      expect((await t.client.querySearchAnalytics(SITE, spec)).rows).toHaveLength(1);
+      expect(t.sleeps).toEqual([seconds * 1000]);
+      expect(t.calls).toHaveLength(2);
+    }
+  });
+  it("does not retry or sleep for a 5xx Retry-After of 120 s and surfaces retryAfterSeconds", async () => {
+    const t = setup([() => googleError(503, {}, { "retry-after": "120" }), queryOk]);
+    const e = await err(t.client.querySearchAnalytics(SITE, spec));
+    expect(e.code).toBe("provider_unavailable");
+    expect(e.retryAfterSeconds).toBe(120);
+    expect(t.sleeps).toEqual([]);
+    expect(t.calls).toHaveLength(1);
+    // Also after an earlier in-budget retry: still no early retry.
+    const later = setup([() => googleError(503), () => googleError(503, {}, { "retry-after": "120" }), queryOk]);
+    const e2 = await err(later.client.querySearchAnalytics(SITE, spec));
+    expect(e2.retryAfterSeconds).toBe(120);
+    expect(later.sleeps).toEqual([200]);
+    expect(later.calls).toHaveLength(2);
+  });
+  it("keeps the retry cap with Retry-After and does not treat quota as a transient failure", async () => {
+    const t = setup([() => googleError(503, {}, { "retry-after": "1" }), () => googleError(503, {}, { "retry-after": "1" }), () => googleError(503, {}, { "retry-after": "1" })]);
+    const e = await err(t.client.listSites());
+    expect(e.code).toBe("provider_unavailable");
+    expect(t.calls).toHaveLength(3);
+    expect(t.sleeps).toEqual([1000, 1000]);
+    expect((await err(setup([() => googleError(403, { errors: [{ reason: "quotaExceeded" }] }, { "retry-after": "1" })]).client.listSites())).code).toBe("quota_exceeded");
+  });
   it("retries transient 5xx with bounded attempts", async () => {
     const ok = setup([() => googleError(503), () => googleError(500), queryOk]);
     expect((await ok.client.querySearchAnalytics(SITE, spec)).rows).toHaveLength(1);
@@ -308,6 +338,34 @@ describe("client: provider errors, retries and limits", () => {
     const tokens = new GoogleTokenProvider({ secret: { get: async () => credJson } as SecretsStoreSecret, fetchImpl: (async () => Response.json({ access_token: "t", expires_in: 3600, scope: SCOPE })) as never });
     const client = new GoogleSearchConsoleClient({ tokens, sleep: async () => {}, fetchImpl: (async () => { throw new TypeError("boom"); }) as never });
     expect((await err(client.listSites())).code).toBe("provider_unavailable");
+  });
+  it("rejects rows whose keys do not match the requested dimensions (missing, too few, too many)", async () => {
+    const two = { ...spec, dimensions: ["query", "page"] as const };
+    const bad: unknown[][] = [
+      [{ clicks: 1 }], // keys missing
+      [{ keys: [], clicks: 1 }],
+      [{ keys: ["only-one"], clicks: 1 }], // too few
+      [{ keys: ["a", "b", "c"], clicks: 1 }], // too many
+      [{ keys: ["a", "b"], clicks: 1 }, { keys: ["a"], clicks: 1 }], // one bad row among valid rows
+    ];
+    for (const rows of bad) {
+      const e = await err(setup([() => Response.json({ rows })]).client.querySearchAnalytics(SITE, two));
+      expect(e.code, JSON.stringify(rows)).toBe("malformed_response");
+      expect(e.message).not.toMatch(/only-one|"a"/);
+    }
+    expect((await err(setup([() => Response.json({ rows: [{ keys: ["a", "b"] }] })]).client.querySearchAnalytics(SITE, spec))).code).toBe("malformed_response"); // too many for one dimension
+  });
+  it("accepts valid multi-dimensional rows exactly, empty results, and null metrics", async () => {
+    const three = { ...spec, dimensions: ["query", "page", "country"] as const };
+    const rows = [{ keys: ["Blue  Shoes ", "https://example.com/a?x=1", "usa"], clicks: 2, impressions: 9, ctr: 0.2222, position: 5 }, { keys: ["", "https://example.com/b", "twn"] }];
+    const r = await setup([() => Response.json({ rows })]).client.querySearchAnalytics(SITE, three);
+    const shaped = shapeSearchAnalytics(SITE, three, r);
+    expect(shaped.rows).toEqual([
+      { dimensions: { query: "Blue  Shoes ", page: "https://example.com/a?x=1", country: "usa" }, clicks: 2, impressions: 9, ctr: 0.2222, position: 5 },
+      { dimensions: { query: "", page: "https://example.com/b", country: "twn" }, clicks: null, impressions: null, ctr: null, position: null },
+    ]);
+    expect((await setup([() => Response.json({})]).client.querySearchAnalytics(SITE, three)).rows).toEqual([]);
+    expect((await setup([() => Response.json({ rows: [] })]).client.querySearchAnalytics(SITE, three)).rows).toEqual([]);
   });
   it("rejects malformed and oversized responses", async () => {
     expect((await err(setup([() => new Response("<html>")]).client.listSites())).code).toBe("malformed_response");

@@ -43,7 +43,7 @@ Response: `siteUrl`, `dateRange {startDate, endDate, timeZone: "America/Los_Ange
 - **No total row count.** `hasMorePossible` is true when a full page came back and is **advisory**; `nextOffset` is the next offset to try. Rows with equal clicks are ordered arbitrarily by Google, so offset paging can skip or repeat rows. Nothing claims completeness.
 - **Values are Google's.** `ctr` is a ratio (0.05 = 5%), `position` is the average result position; neither is recalculated, summed or averaged across rows. Absent metrics are `null`, never `0`; missing dates are not backfilled.
 - **Impressions are not GA4 page views.** The two are different measures from different systems.
-- **Freshness.** `dataState: "final"` excludes recent, still-changing data (the newest days can be empty). `dataState: "all"` includes fresh data; Google then reports `metadata.first_incomplete_date` (and `first_incomplete_hour`), which is returned unchanged. `responseAggregationType` is preserved as returned.
+- **Freshness.** `dataState: "final"` excludes recent, still-changing data (the newest days can be empty). `dataState: "all"` includes fresh data; Google reports `metadata.first_incomplete_date` only when `dataState` is `all` **and** the report is grouped by `date` (include `date` in `dimensions`); other `all` reports carry no such field, so its absence there does not mean the data is complete. When present it is returned unchanged. `responseAggregationType` is preserved as returned.
 
 ## Errors
 
@@ -59,9 +59,9 @@ Response: `siteUrl`, `dateRange {startDate, endDate, timeZone: "America/Los_Ange
 | `permission_denied` | identity lacks access to the property (HTTP 403/404) |
 | `api_disabled` | Search Console API not enabled in the Google Cloud project |
 | `quota_exceeded` / `rate_limited` | Google quota exhausted / rate limiting (`retryAfterSeconds` when given) |
-| `timeout`, `malformed_response`, `response_too_large`, `provider_unavailable` | transport and provider failures |
+| `timeout`, `malformed_response` (also when a row's `keys` do not match the requested dimensions), `response_too_large`, `provider_unavailable` | transport and provider failures |
 
-On HTTP 401 the token is force-refreshed and the request retried exactly once. 5xx, network errors, timeouts and rate limits with `Retry-After` <= 5 s are retried at most twice; quota exhaustion is never retried. 10 s per-attempt timeout; responses are capped at 2 MiB. Logs carry only `{event, operation, attempt, status, outcome, durationMs}` — never queries, URLs, tokens, headers or bodies.
+On HTTP 401 the token is force-refreshed and the request retried exactly once. 5xx, network errors and timeouts are retried at most twice (exponential backoff, or exactly the `Retry-After` when it is <= 5 s; a longer `Retry-After` on a 5xx is never slept — the call fails with `provider_unavailable` and `retryAfterSeconds`). Rate limits with `Retry-After` <= 5 s are retried likewise; quota exhaustion is never retried. 10 s per-attempt timeout; responses are capped at 2 MiB. Logs carry only `{event, operation, attempt, status, outcome, durationMs}` — never queries, URLs, tokens, headers or bodies.
 
 ## Configuration
 

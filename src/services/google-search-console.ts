@@ -234,7 +234,7 @@ export function buildRequestBody(spec: SearchAnalyticsSpec): Record<string, unkn
 const metric = z.number().finite().nullish();
 const queryResponseSchema = z.object({
   rows: z
-    .array(z.object({ keys: z.array(z.string()).default([]), clicks: metric, impressions: metric, ctr: metric, position: metric }))
+    .array(z.object({ keys: z.array(z.string()), clicks: metric, impressions: metric, ctr: metric, position: metric }))
     .default([]),
   responseAggregationType: z.string().nullish(),
   metadata: z.record(z.string(), z.unknown()).nullish(),
@@ -305,6 +305,10 @@ export class GoogleSearchConsoleClient {
     const json = await this.request("search_analytics", "POST", url, JSON.stringify(buildRequestBody(spec)));
     const parsed = queryResponseSchema.safeParse(json);
     if (!parsed.success) throw new GscError("malformed_response", "Search Console returned an unexpected response shape.");
+    // Every row must identify itself by exactly the requested dimensions; a dimension identity is never fabricated.
+    if (parsed.data.rows.some((r) => r.keys.length !== spec.dimensions.length)) {
+      throw new GscError("malformed_response", "Search Console returned rows that do not match the requested dimensions.");
+    }
     return parsed.data;
   }
 
@@ -415,9 +419,11 @@ export class GoogleSearchConsoleClient {
         log("failed");
         throw new GscError("permission_denied", "The Search Console property was not found or the Google identity cannot access it.");
       }
-      if ([500, 502, 503, 504].includes(response.status) && attempt < MAX_RETRIES) {
+      // Transient 5xx: exponential backoff without Retry-After; a Retry-After within the short-wait budget is honored
+      // exactly (never shortened). A longer one is not slept: stop and surface it as retryAfterSeconds.
+      if ([500, 502, 503, 504].includes(response.status) && attempt < MAX_RETRIES && (wait === undefined || wait <= MAX_RETRY_AFTER_SECONDS)) {
         log("retry");
-        await this.sleep(wait !== undefined ? Math.min(wait, MAX_RETRY_AFTER_SECONDS) * 1000 : 200 * 2 ** attempt);
+        await this.sleep(wait !== undefined ? wait * 1000 : 200 * 2 ** attempt);
         continue;
       }
       log("failed");
@@ -452,7 +458,7 @@ export function shapeSites(allowed: string[], visible: SiteEntry[]) {
 
 export function shapeSearchAnalytics(siteUrl: string, spec: SearchAnalyticsSpec, response: SearchAnalyticsResponse) {
   const rows = response.rows.slice(0, spec.limit).map((r) => ({
-    dimensions: Object.fromEntries(spec.dimensions.map((d, i) => [d, r.keys[i] ?? null])),
+    dimensions: Object.fromEntries(spec.dimensions.map((d, i) => [d, r.keys[i]])),
     clicks: r.clicks ?? null,
     impressions: r.impressions ?? null,
     ctr: r.ctr ?? null,
@@ -472,6 +478,6 @@ export function shapeSearchAnalytics(siteUrl: string, spec: SearchAnalyticsSpec,
     responseAggregationType: response.responseAggregationType ?? null,
     metadata: response.metadata ?? {},
     source: "google-search-console" as const,
-    note: "Search Console data is incomplete by design: anonymized queries are omitted and only top rows are returned, so an empty result does not prove zero traffic and totals will not reconcile with the Search Console UI or GA4. Impressions are not page views. ctr is a ratio (0.05 = 5%) and position is Google's average position; neither may be summed or averaged across rows. Absent metrics are null, never 0, and missing dates are not backfilled. There is no total row count; hasMorePossible/nextOffset are advisory only, and offset paging can skip or repeat rows because Google orders equal-click rows arbitrarily. Dates are America/Los_Angeles calendar days; recent days may be incomplete (see metadata.first_incomplete_date when dataState=all).",
+    note: "Search Console data is incomplete by design: anonymized queries are omitted and only top rows are returned, so an empty result does not prove zero traffic and totals will not reconcile with the Search Console UI or GA4. Impressions are not page views. ctr is a ratio (0.05 = 5%) and position is Google's average position; neither may be summed or averaged across rows. Absent metrics are null, never 0, and missing dates are not backfilled. There is no total row count; hasMorePossible/nextOffset are advisory only, and offset paging can skip or repeat rows because Google orders equal-click rows arbitrarily. Dates are America/Los_Angeles calendar days; recent days may be incomplete (see metadata.first_incomplete_date, which Google provides only when dataState=all and the report is grouped by date).",
   };
 }
