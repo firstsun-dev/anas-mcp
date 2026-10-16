@@ -9,7 +9,7 @@ GA4 is queried directly through the **Google Analytics Data API** (`POST https:/
 | Tool | Purpose |
 | --- | --- |
 | `ga4_overview` | Property totals: active/total users, sessions, engaged sessions, engagement rate, screen/page views, average session duration |
-| `ga4_pages` | Per `pagePathPlusQueryString` (distinct query strings stay distinct); optional `pagePath` prefix; ordered by `screenPageViews` desc |
+| `ga4_pages` | Per page; `groupBy` `path` (default, `hostName` + `pagePath`) or `fullUrl` (`pagePathPlusQueryString`); optional `pagePath` prefix; ordered by `screenPageViews` desc |
 | `ga4_acquisition` | Session-scoped channel group / source / medium (not first-user acquisition) |
 | `ga4_run_report` | Catalog-controlled report: max 4 dimensions, 6 metrics, 366 days, 200 rows; no filters/expressions/raw JSON |
 
@@ -22,6 +22,19 @@ Response fields: `propertyId`, `dateRange`, `propertyTimeZone`, `dimensionHeader
 Error codes (`{"error":{"code","message"}}`, `isError: true`): `configuration_missing`, `property_required`, `property_not_allowed`, `invalid_request`, `permission_denied`, `quota_exceeded` (with `retryAfterSeconds` when Google gave one), `provider_unavailable`, `response_too_large`, `google_auth_not_configured`, `google_auth_invalid`, `google_auth_revoked`, `google_auth_unavailable`.
 
 `ga4_run_report` catalog (extend only with a justified change): dimensions `date, country, deviceCategory, browser, operatingSystem, hostName, pagePath, pagePathPlusQueryString, pageTitle, landingPagePlusQueryString, session{DefaultChannelGroup,Source,Medium,SourceMedium,CampaignName}, firstUser{DefaultChannelGroup,Source,Medium,SourceMedium,CampaignName}`; metrics `activeUsers, totalUsers, newUsers, sessions, engagedSessions, engagementRate, bounceRate, screenPageViews, screenPageViewsPerSession, averageSessionDuration, userEngagementDuration, eventCount`. Session-scoped and first-user-scoped dimensions cannot be combined; other incompatible combinations are rejected by Google and reported as `invalid_request`.
+
+## `ga4_pages` grouping (`groupBy`)
+
+| `groupBy` | GA4 dimensions | Row identity |
+| --- | --- | --- |
+| `path` (default) | `hostName`, `pagePath` | One row per host + path. `/p/`, `/p/?share=…`, `/p/?utm_source=…`, `?fbclid=…`, `?gclid=…` are one row. |
+| `fullUrl` | `pagePathPlusQueryString` | One row per distinct query string (previous behavior). |
+
+- Grouping is done by Google's own aggregation before ordering, `limit` and `offset`; the Worker never sums rows. Users (`activeUsers`), `engagementRate` and other non-additive metrics are therefore Google's values for the grouped dimension, not sums or averages of per-query-string rows. Do not add per-variant rows from a `fullUrl` report to reproduce `path` figures: users are not additive and totals will not reconcile.
+- `hostName` is part of the `path` identity so the same path on different hosts is never merged. The result's `dimensionHeaders` and `groupBy` field reflect the mode used.
+- `path` grouping intentionally ignores query strings. Where the query string is content (`/search?q=react` vs `?q=python`) it collapses those pages; use `groupBy: "fullUrl"` for those. No client-side URL canonicalization or parameter stripping is done.
+- The `pagePath` prefix filter applies to the path (without query string) in both modes. Ordering is `screenPageViews` desc, then the grouping dimensions. Thresholding, sampling and `(other)` metadata come from Google per request and are returned as-is.
+- `ga4_overview`, `ga4_acquisition` and `ga4_run_report` are unchanged (`ga4_run_report` keeps explicit dimension control).
 
 ## Configuration
 
