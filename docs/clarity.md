@@ -36,7 +36,14 @@ Local bounds: at most 500 metric rows per tool call (`clarity_overview` keeps th
 `metrics[name]` is an array because the same normalized page can have several raw URL variants; entries are never merged. Canonical run selection is documented in the design.
 
 ## Errors
-`validation`, `missing_configuration`, `data_unavailable`, `database_unavailable` with fixed messages (no SQL, DSNs or driver text). Logs contain only operation, latency, status and SQLSTATE.
+`validation`, `missing_configuration`, `data_unavailable`, `data_quality`, `database_unavailable` with fixed messages (no SQL, DSNs or driver text). Logs contain only operation, latency, status and SQLSTATE.
+
+### Page data quality (`data_quality`)
+`clarity_pages` and `clarity_page` return `data_quality` (never an empty success) when the selected `page` / `page_device` / `page_source` run is non-empty but none of its rows carry a normalized page URL, i.e. page URL dimensions are missing from the ingested dataset. The message states this is an ingestion problem, not an absence of pages or traffic; the dataset must be reprocessed from its stored raw payload (windmill-flows `clarity_reprocess`).
+- The check is a single parameterized `EXISTS` on the selected run (indexed by `fetch_run_id`), executed only when a page read came back empty, so healthy reads pay nothing.
+- A filter or offset that legitimately matches no pages on a dataset that has URLs still returns an empty collection; an unknown single page remains `data_unavailable`.
+- `data_quality` is independent of `sourceTruncated`/`responseTruncated`/`hasMore`; page URLs are never inferred from `PopularPages`, `PageTitle` or acquisition rows.
+- `overview` and `acquisition` are unaffected.
 
 ## Known limitations
 - `technology` and `geo_device` runs are ingested but have no tool yet.

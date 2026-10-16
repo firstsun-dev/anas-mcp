@@ -18,6 +18,7 @@ export type ClarityAnalyticsErrorCode =
   | "validation"
   | "missing_configuration"
   | "data_unavailable"
+  | "data_quality"
   | "database_unavailable";
 
 const SAFE_MESSAGES: Record<ClarityAnalyticsErrorCode, string> = {
@@ -26,6 +27,8 @@ const SAFE_MESSAGES: Record<ClarityAnalyticsErrorCode, string> = {
     "Clarity is not configured: the analytics database binding (ANALYTICS_DB, Hyperdrive) or the approved project allowlist (CLARITY_PROJECT_KEYS) is missing.",
   data_unavailable:
     "No usable Clarity ingestion exists for this request yet. This does not mean there was no traffic.",
+  data_quality:
+    "The latest ingested page dataset contains rows but none carry a page URL dimension, so pages cannot be listed or looked up. This is an ingestion data-quality problem, not an absence of pages or traffic. The dataset must be reprocessed from its stored raw payload.",
   database_unavailable: "The analytics database is temporarily unavailable. Retry later.",
 };
 
@@ -167,6 +170,14 @@ const RUN_SQL = `
     AND r.row_count > 0
   ORDER BY r.window_end_at DESC, r.fetched_at DESC, r.id DESC
   LIMIT 1`;
+
+// Data-quality probe, run only when a page read came back empty: does the selected run carry ANY normalized page URL?
+// EXISTS stops at the first match (served by the fetch_run_id index; a run holds at most ~1000 rows).
+const PAGE_URL_COVERAGE_SQL = `
+  SELECT EXISTS (
+    SELECT 1 FROM blog_analytics.clarity_metric_rows
+    WHERE fetch_run_id = $1 AND project_key = $2 AND query_key = $3 AND url_normalized IS NOT NULL
+  ) AS has_url`;
 
 const OVERVIEW_ROWS_SQL = `
   SELECT metric_name, metric_values
@@ -379,9 +390,12 @@ export class ClarityAnalyticsRepository {
         keys.length === 0
           ? []
           : (await session.query(PAGE_ROWS_SQL, [run.id, projectKey, "page", keys, MAX_GROUP_ROWS, MAX_DETAIL_ROWS + 1])).rows;
-      return { run, keys, moreKeys: found.length > input.limit, rows };
+      // An empty key list is legitimate only if the run has page URLs at all (a filter or offset may simply match none).
+      const urlsMissing = keys.length === 0 && (await this.lacksPageUrls(session, run.id, projectKey, "page"));
+      return { run, keys, moreKeys: found.length > input.limit, rows, urlsMissing };
     });
     if (!result) throw new ClarityAnalyticsError("data_unavailable");
+    if (result.urlsMissing) throw new ClarityAnalyticsError("data_quality");
     const { groups, deferred } = packGroups(result.keys, result.rows, (r) => String(r.url_normalized));
     const meta = this.meta(projectKey, "page", result.run);
     const hasMore = result.moreKeys || deferred;
@@ -456,7 +470,9 @@ export class ClarityAnalyticsRepository {
         const run = await this.selectRun(session, projectKey, queryKey);
         if (!run) return undefined;
         const rows = (await session.query(PAGE_DETAIL_SQL, [run.id, projectKey, queryKey, candidates, MAX_GROUP_ROWS, MAX_DETAIL_ROWS + 1])).rows;
-        return { run, rows };
+        // Empty detail rows: distinguish an unknown page from a run that has no page URLs at all.
+        const urlsMissing = rows.length === 0 && (await this.lacksPageUrls(session, run.id, projectKey, queryKey));
+        return { run, rows, urlsMissing };
       };
       return { overall: await read("page"), device: await read("page_device"), source: await read("page_source") };
     });
@@ -498,6 +514,7 @@ export class ClarityAnalyticsRepository {
     const device = build("page_device", result.device, "device");
     const source = build("page_source", result.source, "source");
     if (!overall && !device && !source) {
+      if ([result.overall, result.device, result.source].some((part) => part?.urlsMissing)) throw new ClarityAnalyticsError("data_quality");
       throw new ClarityAnalyticsError(
         "data_unavailable",
         "No Clarity observation for this page in the latest usable ingestion. The page may be absent from the window or cut off by truncation; this does not mean zero traffic.",
@@ -522,6 +539,12 @@ export class ClarityAnalyticsRepository {
     const map = new Map<string, unknown[]>();
     for (const row of rows) addMetric(map, row.metric_name, row.metric_values);
     return toMetricMap(map);
+  }
+
+  /** True only when the probe positively reports a non-empty run without any page URL (a missing row is never "missing"). */
+  private async lacksPageUrls(session: SqlSession, runId: unknown, projectKey: string, queryKey: ClarityQueryKey): Promise<boolean> {
+    const row = (await session.query(PAGE_URL_COVERAGE_SQL, [runId, projectKey, queryKey])).rows[0];
+    return row?.has_url === false;
   }
 
   private resolveProject(requested: string | undefined): string {
