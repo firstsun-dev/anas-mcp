@@ -48,7 +48,7 @@ describe("repository guardrails", () => {
     expect(config.secrets_store_secrets).toEqual([
       { binding: "GOOGLE_OAUTH_CREDENTIALS", store_id: expect.stringMatching(/^[0-9a-f]{32}$/), secret_name: "ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS" },
     ]);
-    expect(Object.keys(config.vars ?? {}).sort()).toEqual(["ACCESS_AUD", "ACCESS_TEAM_DOMAIN", "CLARITY_PROJECT_KEYS", "GA4_PROPERTY_IDS"]);
+    expect(Object.keys(config.vars ?? {}).sort()).toEqual(["ACCESS_AUD", "ACCESS_TEAM_DOMAIN", "CLARITY_PROJECT_KEYS", "GA4_PROPERTY_IDS", "GSC_ALLOWED_SITES"]);
     expect(config.hyperdrive).toEqual([expect.objectContaining({ binding: "ANALYTICS_DB" })]);
     expect(JSON.stringify(config)).not.toMatch(/bing|apikey|postgres(ql)?:\/\//i);
   });

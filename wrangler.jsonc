@@ -45,9 +45,9 @@
     "CLARITY_PROJECT_KEYS": "wrddojsfjm",
     // Approved GA4 numeric property IDs (identifiers, not credentials). With several IDs every GA4 tool call must pass
     // `propertyId`. GA4 stays disabled until the GOOGLE_OAUTH_CREDENTIALS Secrets Store binding is also added. See docs/ga4.md.
-    "GA4_PROPERTY_IDS": "346676362,269121931"
-    // Search Console is intentionally DISABLED: GSC_ALLOWED_SITES (non-secret JSON string array of verified property
-    // identifiers, e.g. "[\"https://example.com/\",\"sc-domain:example.org\"]") is not set until the operator supplies
-    // them. Do not guess identifiers from GA4/Bing/domains. See docs/gsc.md.
+    "GA4_PROPERTY_IDS": "346676362,269121931",
+    // Approved Search Console property identifiers (non-secret JSON string array, exact values as shown in Search Console;
+    // a URL-prefix property is never widened to its domain). Malformed value disables Search Console. See docs/gsc.md.
+    "GSC_ALLOWED_SITES": "[\"https://firstsun.heavenfortress.com/\",\"sc-domain:heavenfortress.com\"]"
   }
 }

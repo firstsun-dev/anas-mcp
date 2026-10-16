@@ -5,7 +5,8 @@
 - [ ] Operator: enable Search Console API in the Google Cloud project
 - [ ] Operator: confirm the existing refresh token includes `webmasters.readonly`
 - [ ] Operator: confirm the authorized account can access each intended property
-- [ ] Operator: set `GSC_ALLOWED_SITES` (verified identifiers) in `wrangler.jsonc` `vars`; production GSC stays disabled until then
+- [x] `GSC_ALLOWED_SITES` set in `wrangler.jsonc` `vars` to the two operator-supplied identifiers
+- [ ] Operator: verify those identifiers via `gsc_list_sites` after deploy
 
 ## Implementation
 - [x] `src/services/google-search-console.ts`

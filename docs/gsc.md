@@ -4,9 +4,9 @@ Phase 3 of the analytics MCP (issue #16). OpenSpec: `openspec/changes/add-gsc-an
 
 Search Console is queried directly through the **Search Console API** (`https://www.googleapis.com/webmasters/v3`, fixed). Everything is read-only. It reuses the same `GoogleTokenProvider`, Secrets Store credential (`GOOGLE_OAUTH_CREDENTIALS` -> `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS`), token cache and rotation as GA4 (`docs/ga4.md`); there is no second credential, OAuth client or refresh workflow. MCP clients are authenticated only by Cloudflare Access, and Google is never contacted before the Access assertion is validated.
 
-## Status: disabled until configured
+## Status: configured, unverified
 
-`GSC_ALLOWED_SITES` is **not set** in `wrangler.jsonc`, so Search Console is disabled in production (`health` keeps `search-console` under `plannedSources`; both tools return `configuration_missing`). Property identifiers must come from the operator; they are never guessed from GA4, Bing or repository domains.
+`GSC_ALLOWED_SITES` in `wrangler.jsonc` is set to `https://firstsun.heavenfortress.com/` and `sc-domain:heavenfortress.com`. These were supplied by the operator as the intended properties but **have not been verified against the authorized Google account**. After deploy, `gsc_list_sites` shows whether each is accessible (`approvedButNotAccessible` lists any that are not). Correct the identifiers exactly as shown in Search Console if needed. Removing the var (or making it malformed) disables Search Console again (`configuration_missing`).
 
 ## Tools
 
@@ -77,7 +77,7 @@ A URL-prefix property is never widened to its domain: `https://example.com/` and
 1. In the Google Cloud project that owns the OAuth client, confirm the **Google Search Console API** is enabled (otherwise `api_disabled`).
 2. Confirm the existing refresh token includes `https://www.googleapis.com/auth/webmasters.readonly`. If it does not, tools return `google_auth_scope_missing`: re-authorize the same OAuth client with the additional read-only scope outside this repository and rotate the Secrets Store secret (no redeploy). Do not request broader scopes and do not edit the secret by hand in tickets or chat.
 3. Confirm the authorized Google account has access to each intended Search Console property (owner/full/restricted user; unverified access is reported as `queryable: false`). Copy each identifier exactly from the Search Console property selector.
-4. Set `GSC_ALLOWED_SITES` in `wrangler.jsonc` `vars` with the verified identifiers and merge; the central workflow deploys. `health` then lists `search-console` under `enabledSources` — **configuration readiness only; it does not prove live Google authorization**.
+4. Check `GSC_ALLOWED_SITES` in `wrangler.jsonc` `vars` holds the verified identifiers (already set; fix if wrong) and merge; the central workflow deploys. `health` then lists `search-console` under `enabledSources` — **configuration readiness only; it does not prove live Google authorization**.
 5. Verify live access by calling `gsc_list_sites` through Cloudflare Access, then `gsc_search_analytics`. Production verification has not been performed.
 
 Rotation/revocation: identical to GA4 (`docs/ga4.md`); `invalid_grant` surfaces as `google_auth_revoked`.

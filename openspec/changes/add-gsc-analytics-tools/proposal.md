@@ -8,7 +8,7 @@ GA4, Bing and Clarity are live. Search Console (organic queries, pages, clicks, 
 ## What changes
 - `src/services/google-search-console.ts`: fixed-endpoint Search Console API client (`sites.list`, `searchAnalytics.query`), property allowlist parsing, Pacific-time date resolution, bounded retry/timeout/response size, sanitized error mapping.
 - `src/tools/google-search-console.ts`: `gsc_list_sites`, `gsc_search_analytics`.
-- Non-secret `GSC_ALLOWED_SITES` (JSON string array of exact Search Console property identifiers). **Not set in `wrangler.jsonc`**: GSC stays disabled in production until the operator supplies verified identifiers.
+- Non-secret `GSC_ALLOWED_SITES` (JSON string array of exact Search Console property identifiers). Set in `wrangler.jsonc` to the operator-supplied identifiers (unverified until `gsc_list_sites` runs live).
 - `server.ts`: reuse the single `GoogleTokenProvider`; `health` lists `search-console` as enabled only when the credential binding and a valid allowlist exist, otherwise planned.
 - Tests with mocked Google only; `docs/gsc.md`; README, credentials and guardrail updates.
 
