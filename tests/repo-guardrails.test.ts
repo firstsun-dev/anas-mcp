@@ -43,9 +43,11 @@ describe("repository guardrails", () => {
     expect(code).not.toMatch(/clarity\.ms|project-live-insights|clarity_api_token/i);
     expect(code).not.toMatch(/raw_payload/);
   });
-  it("wrangler.jsonc has only non-secret Access/Clarity/GA4 vars, no Secrets Store bindings, and the ANALYTICS_DB Hyperdrive binding", () => {
+  it("wrangler.jsonc has only non-secret Access/Clarity/GA4 vars, only the Google credential Secrets Store binding, and the ANALYTICS_DB Hyperdrive binding", () => {
     const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;
-    expect(config.secrets_store_secrets).toBeUndefined();
+    expect(config.secrets_store_secrets).toEqual([
+      { binding: "GOOGLE_OAUTH_CREDENTIALS", store_id: expect.stringMatching(/^[0-9a-f]{32}$/), secret_name: "ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS" },
+    ]);
     expect(Object.keys(config.vars ?? {}).sort()).toEqual(["ACCESS_AUD", "ACCESS_TEAM_DOMAIN", "CLARITY_PROJECT_KEYS", "GA4_PROPERTY_IDS"]);
     expect(config.hyperdrive).toEqual([expect.objectContaining({ binding: "ANALYTICS_DB" })]);
     expect(JSON.stringify(config)).not.toMatch(/bing|apikey|postgres(ql)?:\/\//i);
@@ -175,7 +177,7 @@ describe("repository guardrails", () => {
     const code = stripComments(allSource() + read("wrangler.jsonc"));
     expect(code).not.toMatch(/ANAS_MCP_API_KEY|ANAS_PROD_MCP_API_KEY/);
     // The only approved Secrets Store consumer is the Google credential binding (not an MCP auth mechanism).
-    expect(stripComments(read("wrangler.jsonc"))).not.toMatch(/secrets_store/);
+    expect(stripComments(read("wrangler.jsonc")).match(/secret_name/g)).toHaveLength(1);
     expect(code).not.toMatch(/headers\.get\(["']authorization["']\)/i);
   });
   it("no database URL or credential is committed in config or source", () => {

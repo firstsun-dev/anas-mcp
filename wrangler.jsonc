@@ -24,6 +24,15 @@
       "id": "8677c23af5c14b43a460169f2f2cc93f"
     }
   ],
+  // Shared Google OAuth credential (authorized_user JSON) for GA4 and, later, Search Console. Secrets Store only; the
+  // value is never in this file. Store ID verified against the account's single default_secrets_store. See docs/ga4.md.
+  "secrets_store_secrets": [
+    {
+      "binding": "GOOGLE_OAUTH_CREDENTIALS",
+      "store_id": "a2a4a60a04b142d3a0c7d482542e67fc",
+      "secret_name": "ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS"
+    }
+  ],
   // Cloudflare Access origin validation (non-secret identifiers; the Access application is Terraform-managed in
   // firstsun-dev/infra-config). The Worker fails closed (503 on /mcp) until BOTH values are set. Fill them from
   // the infra-config outputs `anas_mcp_access_team_domain` / `anas_mcp_access_aud` as part of the coordinated

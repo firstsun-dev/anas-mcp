@@ -30,15 +30,7 @@ Error codes (`{"error":{"code","message"}}`, `isError: true`): `configuration_mi
 | `GA4_PROPERTY_IDS` | `wrangler.jsonc` `vars` (non-secret) | Comma-separated numeric property IDs, e.g. `123456789`. Any malformed entry disables GA4 (fail closed). With several IDs every call must pass `propertyId`. |
 | `GOOGLE_OAUTH_CREDENTIALS` | Secrets Store binding | Secret `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS` (staging: `ANAS_STAGING_...`) |
 
-`GA4_PROPERTY_IDS` is committed (`346676362,269121931`, so `propertyId` is required on every call). The Secrets Store binding is not committed yet because the real store ID is operator-provided; add it when known:
-
-```jsonc
-"secrets_store_secrets": [
-  { "binding": "GOOGLE_OAUTH_CREDENTIALS", "store_id": "<operator store id>", "secret_name": "ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS" }
-]
-```
-
-(Update `tests/repo-guardrails.test.ts`, which currently asserts no `secrets_store_secrets`/extra vars, in the same change.)
+Both are committed: `GA4_PROPERTY_IDS` = `346676362,269121931` (so `propertyId` is required on every call) and the `secrets_store_secrets` binding `GOOGLE_OAUTH_CREDENTIALS` -> `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS` in the account's default Secrets Store (store ID is an identifier, not a credential).
 
 ## Credential
 
@@ -60,7 +52,7 @@ Runtime behavior: the Worker reads the secret asynchronously, validates it with 
 2. Authorize the intended Google identity with the read-only scope(s) (e.g. OAuth consent for `analytics.readonly`) and obtain the refresh token outside this repository.
 3. Grant that identity **Viewer** (or higher read access) on each approved GA4 property.
 4. Create Secrets Store secret `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS` with the JSON above (do not paste it into logs, tickets or chat).
-5. Add the binding and `GA4_PROPERTY_IDS` in a PR, merge, and let the central workflow deploy. `health` then lists `ga4` in `enabledSources` — configuration readiness only; verify real access by calling `ga4_overview` through Cloudflare Access.
+5. Merge the PR (binding and `GA4_PROPERTY_IDS` are already in `wrangler.jsonc`) and let the central workflow deploy. `health` then lists `ga4` in `enabledSources` — configuration readiness only; verify real access by calling `ga4_overview` through Cloudflare Access.
 6. **Rotation:** update the secret value in Secrets Store; the next request picks it up (no redeploy). **Revocation:** revoke at Google; tools return `google_auth_revoked` until a new credential is stored. Re-authorize and rotate.
 
 ## Quotas and limits
