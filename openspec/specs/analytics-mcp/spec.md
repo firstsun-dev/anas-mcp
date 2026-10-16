@@ -305,3 +305,6 @@ Analytics tools SHALL enforce bounded request and response sizes.
 - WHEN a caller requests `/health`
 - THEN the service may return a minimal readiness response such as `{ "status": "ok" }`
 - AND it SHALL NOT disclose credentials, Access configuration, provider authentication state, database details, or analytics data
+
+### Requirement: Clarity MCP tools
+The service SHALL expose read-only `clarity_overview`, `clarity_pages`, `clarity_acquisition`, and `clarity_page` MCP tools served from the canonical usable Clarity fetch run (`success`/`truncated` with rows), never summing rows across runs, windows, or breakdowns, flagging source truncation (`sourceTruncated`) separately from local response truncation (`responseTruncated`, bounded per-group/per-call detail reads with `nextOffset` continuation), and returning `data_unavailable` rather than zero metrics. Clarity tools SHALL only read projects in the non-secret `CLARITY_PROJECT_KEYS` allowlist and fail closed with `missing_configuration` otherwise. See `openspec/changes/add-clarity-analytics-tools/`.

@@ -3,7 +3,7 @@
 // Bing is ingested by firstsun-dev/windmill-flows into PostgreSQL (schema blog_analytics). This module only
 // reads the *latest successful* datasets through the bing_latest_* views over read-only Hyperdrive. It never
 // calls Bing and only runs the fixed, parameterized statements below.
-import { Client } from "pg";
+import { createHyperdriveRunner, sqlState, toDay, toIso, type SessionRunner, type SqlSession } from "./sql-session";
 
 export type BingAnalyticsErrorCode =
   | "validation"
@@ -71,33 +71,11 @@ export interface SearchPerformanceQuery {
   offset: number;
 }
 
-export interface SqlSession {
-  query(text: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
-}
-/** Runs `fn` inside one consistent read-only snapshot. */
-export type SessionRunner = <T>(fn: (session: SqlSession) => Promise<T>) => Promise<T>;
+export type { SqlSession, SessionRunner };
 
 /** Production runner: one short-lived pg connection per call through Hyperdrive, in a read-only snapshot. */
 export function hyperdriveRunner(binding: Hyperdrive | undefined): SessionRunner {
-  return async (fn) => {
-    if (!binding) throw new BingAnalyticsError("missing_configuration");
-    const client = new Client({ connectionString: binding.connectionString, connectionTimeoutMillis: 5000 });
-    try {
-      await client.connect();
-      // REPEATABLE READ makes the run-metadata query and the row query see the same latest-success run.
-      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      try {
-        const result = await fn(client);
-        await client.query("COMMIT");
-        return result;
-      } catch (error) {
-        await client.query("ROLLBACK").catch(() => undefined);
-        throw error;
-      }
-    } finally {
-      await client.end().catch(() => undefined);
-    }
-  };
+  return createHyperdriveRunner(binding, () => new BingAnalyticsError("missing_configuration"));
 }
 
 export function isValidCalendarDate(value: string): boolean {
@@ -129,18 +107,6 @@ export function computeStale(fetchedAt: string | null, now: Date): boolean | "un
   return now.getTime() - fetched > STALE_AFTER_HOURS * 3_600_000;
 }
 
-const toIso = (value: unknown): string | null => {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
-  if (typeof value === "string") {
-    const t = Date.parse(value);
-    return Number.isNaN(t) ? null : new Date(t).toISOString();
-  }
-  return null;
-};
-const toDay = (value: unknown): string | null => {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
-};
 // pg returns BIGINT as a string and DOUBLE PRECISION as a number; NULL must stay null (never 0).
 const toNum = (value: unknown): number | null => {
   if (value === null || value === undefined) return null;
@@ -250,8 +216,7 @@ export class BingAnalyticsRepository {
     } catch (error) {
       if (error instanceof BingAnalyticsError) throw error;
       // Driver errors can embed hostnames/SQL; log only the SQLSTATE and return a fixed message.
-      const sqlState = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "unknown";
-      this.log({ operation, latencyMs: Date.now() - started, status: "database_error", sqlState });
+      this.log({ operation, latencyMs: Date.now() - started, status: "database_error", sqlState: sqlState(error) });
       throw new BingAnalyticsError("database_unavailable");
     }
   }

@@ -15,6 +15,8 @@ const MCP_ALLOWED_HOSTNAMES = [MCP_PUBLIC_HOSTNAME, ...localhostAllowedHostnames
 export interface Env {
   /** Read-only Hyperdrive binding to the windmill_pipeline PostgreSQL database (schema blog_analytics). */
   ANALYTICS_DB?: Hyperdrive;
+  /** Comma-separated approved Clarity `project_key` values (non-secret). Clarity tools fail closed until set. */
+  CLARITY_PROJECT_KEYS?: string;
   /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`). Non-secret; owned by infra-config. */
   ACCESS_TEAM_DOMAIN?: string;
   /** AUD tag of the Access application protecting `/mcp`. Non-secret; owned by infra-config. */
