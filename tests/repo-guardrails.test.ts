@@ -8,13 +8,17 @@ const sourceFiles = (dir: string): string[] =>
   readdirSync(new URL(`../${dir}`, import.meta.url), { withFileTypes: true }).flatMap((e) =>
     e.isDirectory() ? sourceFiles(`${dir}/${e.name}`) : [`${dir}/${e.name}`],
   );
+/** The only modules allowed to make outbound calls: fixed Google endpoints (token + Analytics Data API). */
+const GOOGLE_MODULES = ["src/auth/google-oauth.ts", "src/services/google-analytics.ts"];
 const allSource = () => sourceFiles("src").map(read).join("\n");
+const nonGoogleSource = () => sourceFiles("src").filter((f) => !GOOGLE_MODULES.includes(f)).map(read).join("\n");
 
 describe("repository guardrails", () => {
   it("the Worker never calls Bing: no Bing host, apikey, or outbound fetch in src/", () => {
     const code = stripComments(allSource());
     expect(code).not.toMatch(/ssl\.bing\.com|api\.svc|webmaster\/api|apikey|BING_WEBMASTER_TOKEN|ThrottleIP/i);
-    expect(code).not.toMatch(/(await\s+|=\s*|return\s+)fetch\(|globalThis\.fetch/);
+    // Outbound fetch is confined to the two Google modules; everything else stays fetch-free.
+    expect(stripComments(nonGoogleSource())).not.toMatch(/(await\s+|=\s*|return\s+)fetch\(|globalThis\.fetch/);
   });
   it("no direct Bing client module remains", () => {
     expect(sourceFiles("src")).not.toContain("src/services/bing-webmaster.ts");
@@ -45,6 +49,20 @@ describe("repository guardrails", () => {
     expect(Object.keys(config.vars ?? {}).sort()).toEqual(["ACCESS_AUD", "ACCESS_TEAM_DOMAIN", "CLARITY_PROJECT_KEYS"]);
     expect(config.hyperdrive).toEqual([expect.objectContaining({ binding: "ANALYTICS_DB" })]);
     expect(JSON.stringify(config)).not.toMatch(/bing|apikey|postgres(ql)?:\/\//i);
+  });
+  it("outbound hosts are fixed Google endpoints only, confined to the Google modules", () => {
+    const hosts = (file: string) => [...stripComments(read(file)).matchAll(/https?:\/\/[^\s"'`/]+/g)].map((m) => m[0]);
+    expect(new Set(hosts("src/auth/google-oauth.ts"))).toEqual(new Set(["https://oauth2.googleapis.com", "https://www.googleapis.com"]));
+    expect(new Set(hosts("src/services/google-analytics.ts"))).toEqual(new Set(["https://analyticsdata.googleapis.com"]));
+    // Only read-only Google scopes are ever referenced.
+    const scopes = [...stripComments(allSource()).matchAll(/googleapis\.com\/(auth\/[a-z.]+)/g)].map((m) => m[1]);
+    expect(new Set(scopes)).toEqual(new Set(["auth/analytics.readonly", "auth/webmasters.readonly"]));
+    expect(stripComments(allSource())).not.toMatch(/GOOGLE_TOKEN_URL|token_uri|tokenEndpoint\s*[:=]\s*input/);
+  });
+  it("the Google credential binding is read only inside the shared Google token provider", () => {
+    for (const f of sourceFiles("src").filter((f) => f !== "src/auth/google-oauth.ts" && f !== "src/index.ts" && f !== "src/server.ts")) {
+      expect(stripComments(read(f)), f).not.toMatch(/GOOGLE_OAUTH_CREDENTIALS|\.secret\.get\(|SecretsStoreSecret/);
+    }
   });
   it("workers.dev and Version/Preview URLs are disabled so Access on the custom domain cannot be bypassed", () => {
     // workers.dev and Version/Preview URLs are a separate ingress that does not go through the Access
@@ -155,7 +173,9 @@ describe("repository guardrails", () => {
   it("the transitional Worker-local API key is fully removed (Access JWT is the only production gate)", () => {
     expect(sourceFiles("src")).not.toContain("src/auth/mcp-api-key.ts");
     const code = stripComments(allSource() + read("wrangler.jsonc"));
-    expect(code).not.toMatch(/ANAS_MCP_API_KEY|ANAS_PROD_MCP_API_KEY|SecretsStoreSecret|secrets_store/);
+    expect(code).not.toMatch(/ANAS_MCP_API_KEY|ANAS_PROD_MCP_API_KEY/);
+    // The only approved Secrets Store consumer is the Google credential binding (not an MCP auth mechanism).
+    expect(stripComments(read("wrangler.jsonc"))).not.toMatch(/secrets_store/);
     expect(code).not.toMatch(/headers\.get\(["']authorization["']\)/i);
   });
   it("no database URL or credential is committed in config or source", () => {

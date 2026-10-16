@@ -84,6 +84,10 @@ For structured credentials such as Google OAuth JSON:
 5. Keep the short-lived token only in runtime memory.
 6. Redact all credential material from errors and telemetry.
 
+## Google OAuth credential (GA4, Search Console)
+
+Binding `GOOGLE_OAUTH_CREDENTIALS` -> Secrets Store secret `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS`: one `authorized_user` JSON (`client_id`, `client_secret`, `refresh_token`) limited to the read-only scopes `analytics.readonly` and `webmasters.readonly`. Read only by `src/auth/google-oauth.ts`; rotate by updating the secret (no redeploy). Shape, scope contract and runbook: `docs/ga4.md`. It is not an MCP authentication credential.
+
 ## Review checklist
 
 Before introducing any credential, answer:

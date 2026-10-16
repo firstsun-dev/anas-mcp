@@ -69,6 +69,10 @@ describe("tool registration and health", () => {
       "clarity_overview",
       "clarity_page",
       "clarity_pages",
+      "ga4_acquisition",
+      "ga4_overview",
+      "ga4_pages",
+      "ga4_run_report",
       "health",
     ]);
     for (const t of tools.filter((t: any) => t.name.startsWith("clarity_"))) {
