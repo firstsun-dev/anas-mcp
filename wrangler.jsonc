@@ -33,6 +33,9 @@
     "ACCESS_AUD": "1041a0fe23797ad6035a58c1f501544d853c8098bd5165c6b9c89174cad55327",
     // Approved Microsoft Clarity project_key allowlist (identifier, not a credential); must equal the Windmill variable
     // f/blog_analytics/clarity_project_key. Comma-separated for several projects. See docs/clarity.md.
-    "CLARITY_PROJECT_KEYS": "wrddojsfjm"
+    "CLARITY_PROJECT_KEYS": "wrddojsfjm",
+    // Approved GA4 numeric property IDs (identifiers, not credentials). With several IDs every GA4 tool call must pass
+    // `propertyId`. GA4 stays disabled until the GOOGLE_OAUTH_CREDENTIALS Secrets Store binding is also added. See docs/ga4.md.
+    "GA4_PROPERTY_IDS": "346676362,269121931"
   }
 }

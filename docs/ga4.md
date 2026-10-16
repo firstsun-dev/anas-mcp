@@ -30,13 +30,12 @@ Error codes (`{"error":{"code","message"}}`, `isError: true`): `configuration_mi
 | `GA4_PROPERTY_IDS` | `wrangler.jsonc` `vars` (non-secret) | Comma-separated numeric property IDs, e.g. `123456789`. Any malformed entry disables GA4 (fail closed). With several IDs every call must pass `propertyId`. |
 | `GOOGLE_OAUTH_CREDENTIALS` | Secrets Store binding | Secret `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS` (staging: `ANAS_STAGING_...`) |
 
-Neither is committed yet: the real Secrets Store ID and property IDs are operator-provided. Add to `wrangler.jsonc` only when known:
+`GA4_PROPERTY_IDS` is committed (`346676362,269121931`, so `propertyId` is required on every call). The Secrets Store binding is not committed yet because the real store ID is operator-provided; add it when known:
 
 ```jsonc
 "secrets_store_secrets": [
   { "binding": "GOOGLE_OAUTH_CREDENTIALS", "store_id": "<operator store id>", "secret_name": "ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS" }
-],
-"vars": { "GA4_PROPERTY_IDS": "<property id>" }
+]
 ```
 
 (Update `tests/repo-guardrails.test.ts`, which currently asserts no `secrets_store_secrets`/extra vars, in the same change.)
