@@ -98,6 +98,14 @@ describe.skipIf(!ADMIN_URL)("Clarity PostgreSQL read model (real database)", () 
     await metric(acq, "proj-a", "acquisition", "Traffic", { totalSessionCount: "2" }, { source: "google", medium: "organic", channel: "Search", hash: "a1" });
     await metric(acq, "proj-a", "acquisition", "Traffic", { totalSessionCount: "3" }, { source: "bing", medium: "organic", channel: "Search", hash: "a2" });
 
+    // --- proj-nourl: a successful, non-empty page ingestion whose rows all lack a normalized URL (the Url/URL mismatch).
+    const noUrl = await run("proj-nourl", "page", "success", "2026-10-15T00:30:00Z", { rows: 286 });
+    for (let i = 0; i < 5; i++) await metric(noUrl, "proj-nourl", "page", "Traffic", { totalSessionCount: String(i) }, { hash: `n${i}` });
+    const noUrlDev = await run("proj-nourl", "page_device", "success", "2026-10-15T00:30:00Z", { rows: 5 });
+    await metric(noUrlDev, "proj-nourl", "page_device", "Traffic", { totalSessionCount: "1" }, { device: "PC", hash: "nd" });
+    const noUrlOverall = await run("proj-nourl", "site_overall", "success", "2026-10-15T00:30:00Z", { rows: 1 });
+    await metric(noUrlOverall, "proj-nourl", "site_overall", "Traffic", { totalSessionCount: "9" });
+
     // --- oversized datasets from otherwise successful ingestions (project proj-big).
     const bulk = async (runId: string, query: string, n: number, dims: Parameters<typeof metric>[5]) => {
       for (let i = 0; i < n; i++) await metric(runId, "proj-big", query, `M${String(i).padStart(4, "0")}`, { v: i }, { ...dims, hash: dims.hash });
@@ -155,6 +163,26 @@ describe.skipIf(!ADMIN_URL)("Clarity PostgreSQL read model (real database)", () 
     expect(next.rows.map((x) => x.page)).toEqual(["/blog/b/"]);
     expect(next.hasMore).toBe(false);
     expect(JSON.stringify([r, next])).not.toContain("stale-only");
+  });
+  it("pages: a non-empty run with zero normalized URLs is data_quality, never an empty success", async () => {
+    const err = await repo(["proj-nourl"]).pages({ limit: 10, offset: 0 }).then(() => undefined, (e) => e);
+    expect(err?.code).toBe("data_quality");
+    const filtered = await repo(["proj-nourl"]).pages({ limit: 10, offset: 0, pagePrefix: "/blog/" }).then(() => undefined, (e) => e);
+    expect(filtered?.code).toBe("data_quality");
+  });
+  it("page: no-URL ingestion is data_quality while a healthy dataset's unknown page stays data_unavailable", async () => {
+    const bad = await repo(["proj-nourl"]).page({ page: "/blog/a/" }).then(() => undefined, (e) => e);
+    expect(bad?.code).toBe("data_quality");
+    const unknown = await repo().page({ page: "/never-seen/" }).then(() => undefined, (e) => e);
+    expect(unknown?.code).toBe("data_unavailable");
+  });
+  it("pages: a legitimate no-match prefix on a healthy dataset is an empty result", async () => {
+    const r = await repo().pages({ limit: 10, offset: 0, pagePrefix: "/zzz/" });
+    expect(r.rows).toEqual([]);
+    expect(r.hasMore).toBe(false);
+  });
+  it("overview is unaffected by a page dataset without URLs", async () => {
+    expect((await repo(["proj-nourl"]).overview()).rowCount).toBe(1);
   });
   it("pages: prefix filter is literal (LIKE wildcards are not interpreted)", async () => {
     expect((await repo().pages({ limit: 10, offset: 0, pagePrefix: "/blog/" })).rows.map((x) => x.page)).toEqual(["/blog/a/", "/blog/b/"]);

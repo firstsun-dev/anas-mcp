@@ -275,6 +275,88 @@ describe("pages", () => {
   });
 });
 
+describe("page dataset data quality (zero normalized URLs)", () => {
+  const noUrlRun = (text: string, values: unknown[] = []) => {
+    if (text.includes("clarity_fetch_runs")) return [runRow({ row_count: 286 })];
+    if (text.includes("EXISTS")) return [{ has_url: false }];
+    return [];
+  };
+  const withUrls = (hasUrl: boolean, keys: Record<string, unknown>[] = []) => (text: string) => {
+    if (text.includes("clarity_fetch_runs")) return [runRow({ row_count: 286 })];
+    if (text.includes("EXISTS")) return [{ has_url: hasUrl }];
+    if (text.includes("GROUP BY url_normalized")) return keys;
+    return [];
+  };
+
+  it("a 286-row run with zero normalized URLs is a data_quality error, not an empty success", async () => {
+    const { run } = fakeRunner(noUrlRun);
+    const err = await codeOf(repo(run).pages({ limit: 25, offset: 0 }));
+    expect(err.code).toBe("data_quality");
+    expect(err.message).toMatch(/page URL dimension/);
+    expect(err.message).toMatch(/not an absence of pages or traffic/);
+    expect(err.message).not.toMatch(/SELECT|blog_analytics|postgres|raw_payload/i);
+  });
+  it("a prefix filter on a run with zero URLs still reports the data-quality problem, not zero matches", async () => {
+    const { run } = fakeRunner(noUrlRun);
+    expect((await codeOf(repo(run).pages({ limit: 5, offset: 0, pagePrefix: "/blog/" }))).code).toBe("data_quality");
+  });
+  it("a legitimate prefix filter with no matches returns an empty collection", async () => {
+    const { run } = fakeRunner(withUrls(true));
+    const r = await repo(run).pages({ limit: 5, offset: 0, pagePrefix: "/nothing/" });
+    expect(r.rows).toEqual([]);
+    expect(r.rowCount).toBe(0);
+    expect(r.hasMore).toBe(false);
+    expect(r.nextOffset).toBeNull();
+  });
+  it("paging past the end of a dataset that has URLs is an empty page, not an error", async () => {
+    const { run } = fakeRunner(withUrls(true));
+    expect((await repo(run).pages({ limit: 5, offset: 50 })).rows).toEqual([]);
+  });
+  it("a dataset with pages never runs the probe, and the probe is a bounded parameterized EXISTS", async () => {
+    const found = fakeRunner((text) => (text.includes("GROUP BY url_normalized") ? [{ url_normalized: "/a/" }] : text.includes("clarity_fetch_runs") ? [runRow()] : [{ url_normalized: "/a/", metric_name: "Traffic", metric_values: {}, group_rows: "1" }]));
+    await repo(found.run).pages({ limit: 5, offset: 0 });
+    expect(found.calls.some((c) => c.text.includes("EXISTS"))).toBe(false);
+    const empty = fakeRunner(noUrlRun);
+    await codeOf(repo(empty.run).pages({ limit: 5, offset: 0 }));
+    const probe = empty.calls.find((c) => c.text.includes("EXISTS"))!;
+    expect(probe.values).toEqual(["41", PROJECT, "page"]);
+    expect(probe.text).toContain("fetch_run_id = $1 AND project_key = $2 AND query_key = $3");
+  });
+  it("a missing or malformed probe result never crashes and is not mistaken for missing URLs", async () => {
+    for (const probe of [[], [{}], [{ has_url: null }], [{ has_url: "nope" }]]) {
+      const { run } = fakeRunner((text) => (text.includes("clarity_fetch_runs") ? [runRow()] : text.includes("EXISTS") ? probe : []));
+      expect((await repo(run).pages({ limit: 5, offset: 0 })).rows).toEqual([]);
+    }
+  });
+  it("source truncation stays independent of data quality", async () => {
+    const { run } = fakeRunner((text) => (text.includes("clarity_fetch_runs") ? [runRow({ status: "truncated", truncated_suspected: true })] : text.includes("EXISTS") ? [{ has_url: true }] : []));
+    const r = await repo(run).pages({ limit: 5, offset: 0 });
+    expect(r.sourceTruncated).toBe(true);
+    expect(r.responseTruncated).toBe(false);
+    expect(r.responseComplete).toBe(false);
+  });
+  it("clarity_page: a nonexistent page in a dataset that has URLs is data_unavailable", async () => {
+    const { run } = fakeRunner((text) => (text.includes("clarity_fetch_runs") ? [runRow()] : text.includes("EXISTS") ? [{ has_url: true }] : []));
+    const err = await codeOf(repo(run).page({ page: "/missing/" }));
+    expect(err.code).toBe("data_unavailable");
+    expect(err.message).toMatch(/does not mean zero traffic/);
+  });
+  it("clarity_page: an ingestion without URLs is data_quality, distinct from an unknown page", async () => {
+    const { run } = fakeRunner(noUrlRun);
+    expect((await codeOf(repo(run).page({ page: "/blog/a/" }))).code).toBe("data_quality");
+  });
+  it("clarity_page still returns data when only some sections lack URLs", async () => {
+    const { run } = fakeRunner((text, values) => {
+      if (text.includes("clarity_fetch_runs")) return [runRow()];
+      if (text.includes("EXISTS")) return [{ has_url: false }];
+      if (values[2] === "page") return [{ device: null, source: null, metric_name: "Traffic", metric_values: { totalSessionCount: "7" }, group_rows: "1" }];
+      return [];
+    });
+    const r = await repo(run).page({ page: "/blog/a/" });
+    expect(r.observation?.metrics).toEqual({ Traffic: [{ totalSessionCount: "7" }] });
+  });
+});
+
 describe("acquisition", () => {
   it("preserves null attribution and keeps cells separate", async () => {
     const { run } = fakeRunner((text) => {

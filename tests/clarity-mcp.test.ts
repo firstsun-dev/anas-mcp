@@ -159,6 +159,24 @@ describe("clarity tools over MCP", () => {
     expect(e.code).toBe("data_unavailable");
     expect(e.message).toMatch(/no traffic/);
   });
+  it("reports a page dataset without URLs as data_quality over MCP, with a safe message", async () => {
+    db.handler = (text) => (text.includes("clarity_fetch_runs") ? [{ ...runRow, row_count: 286 }] : text.includes("EXISTS") ? [{ has_url: false }] : []);
+    for (const [tool, args] of [["clarity_pages", {}], ["clarity_page", { page: "/blog/a/" }]] as const) {
+      const r = await call(tool, args);
+      expect(r.json.result.isError).toBe(true);
+      expect(errorOf(r).code).toBe("data_quality");
+      expect(errorOf(r).message).toMatch(/not an absence of pages or traffic/);
+      expect(r.text).not.toMatch(/SELECT|raw_payload|postgres:\/\//i);
+    }
+  });
+  it("keeps overview and acquisition working when the page dataset has no URLs", async () => {
+    db.handler = (text) => {
+      if (text.includes("EXISTS")) return [{ has_url: false }];
+      return healthy(text);
+    };
+    expect(payload(await call("clarity_overview", {})).queryKey).toBe("site_overall");
+    expect(payload(await call("clarity_acquisition", {})).rows[0].source).toBe("bing");
+  });
   it("sanitizes database failures", async () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     db.connectError = Object.assign(new Error("connect to postgres://u:hunter2@db.internal failed"), { code: "ECONNREFUSED" });
