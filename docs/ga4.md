@@ -9,7 +9,7 @@ GA4 is queried directly through the **Google Analytics Data API** (`POST https:/
 | Tool | Purpose |
 | --- | --- |
 | `ga4_overview` | Property totals: active/total users, sessions, engaged sessions, engagement rate, screen/page views, average session duration |
-| `ga4_pages` | Per page; `groupBy` `path` (default, `hostName` + `pagePath`) or `fullUrl` (`pagePathPlusQueryString`); optional `pagePath` prefix; ordered by `screenPageViews` desc |
+| `ga4_pages` | Per page; `groupBy` `path` (default, `hostName` + `pagePath`) or `fullUrl` (`hostName` + `pagePathPlusQueryString`); optional `pagePath` prefix; ordered by `screenPageViews` desc |
 | `ga4_acquisition` | Session-scoped channel group / source / medium (not first-user acquisition) |
 | `ga4_run_report` | Catalog-controlled report: max 4 dimensions, 6 metrics, 366 days, 200 rows; no filters/expressions/raw JSON |
 
@@ -28,10 +28,11 @@ Error codes (`{"error":{"code","message"}}`, `isError: true`): `configuration_mi
 | `groupBy` | GA4 dimensions | Row identity |
 | --- | --- | --- |
 | `path` (default) | `hostName`, `pagePath` | One row per host + path. `/p/`, `/p/?share=…`, `/p/?utm_source=…`, `?fbclid=…`, `?gclid=…` are one row. |
-| `fullUrl` | `pagePathPlusQueryString` | One row per distinct query string (previous behavior). |
+| `fullUrl` | `hostName`, `pagePathPlusQueryString` | One row per host + path + query string. `fullUrl` means hostname + path + query string, not merely path + query string. |
 
 - Grouping is done by Google's own aggregation before ordering, `limit` and `offset`; the Worker never sums rows. Users (`activeUsers`), `engagementRate` and other non-additive metrics are therefore Google's values for the grouped dimension, not sums or averages of per-query-string rows. Do not add per-variant rows from a `fullUrl` report to reproduce `path` figures: users are not additive and totals will not reconcile.
-- `hostName` is part of the `path` identity so the same path on different hosts is never merged. The result's `dimensionHeaders` and `groupBy` field reflect the mode used.
+- **Response-shape change (#23):** `fullUrl` previously requested only `pagePathPlusQueryString`, which let Google merge the same path on different hosts (e.g. `/` on two domains became one row). `fullUrl` rows now carry `hostName` too, so consumers reading `dimensions.pagePathPlusQueryString` still work but must expect an extra `dimensions.hostName` and an extra leading entry in `dimensionHeaders`.
+- `hostName` is part of both modes' identity so the same path on different hosts is never merged. The result's `dimensionHeaders` and `groupBy` field reflect the mode used.
 - `path` grouping intentionally ignores query strings. Where the query string is content (`/search?q=react` vs `?q=python`) it collapses those pages; use `groupBy: "fullUrl"` for those. No client-side URL canonicalization or parameter stripping is done.
 - The `pagePath` prefix filter applies to the path (without query string) in both modes. Ordering is `screenPageViews` desc, then the grouping dimensions. Thresholding, sampling and `(other)` metadata come from Google per request and are returned as-is.
 - `ga4_overview`, `ga4_acquisition` and `ga4_run_report` are unchanged (`ga4_run_report` keeps explicit dimension control).

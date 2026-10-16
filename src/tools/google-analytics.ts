@@ -90,7 +90,7 @@ export function registerGoogleAnalyticsTools(server: McpServer, ctx: Ga4Context)
     "ga4_pages",
     {
       title: "GA4: pages",
-      description: `Traffic and engagement per page. groupBy="path" (default) groups by hostName + pagePath, so URLs differing only by query string (share, utm_*, fbclid, gclid, ...) are one row; Google aggregates the metrics (users and rates are never summed locally). Path grouping does NOT preserve distinctions carried only in query parameters (e.g. /search?q=a vs ?q=b); use groupBy="fullUrl" for per-pagePathPlusQueryString rows. Ordered by screenPageViews descending then the grouping dimensions; page with offset. pagePath filters to paths beginning with that prefix in both modes. ${SEMANTICS_NOTE}`,
+      description: `Traffic and engagement per page. groupBy="path" (default) groups by hostName + pagePath, so URLs differing only by query string (share, utm_*, fbclid, gclid, ...) are one row; Google aggregates the metrics (users and rates are never summed locally). Path grouping does NOT preserve distinctions carried only in query parameters (e.g. /search?q=a vs ?q=b); use groupBy="fullUrl" for per-hostName + pagePathPlusQueryString rows (hostname + path + query string; hosts are never merged in either mode). Ordered by screenPageViews descending then the grouping dimensions; page with offset. pagePath filters to paths beginning with that prefix in both modes. ${SEMANTICS_NOTE}`,
       inputSchema: z.object({
         propertyId: propertyIdSchema,
         startDate: startSchema,
@@ -98,14 +98,14 @@ export function registerGoogleAnalyticsTools(server: McpServer, ctx: Ga4Context)
         limit: limitSchema,
         offset: offsetSchema,
         pagePath: z.string().min(1).max(512).startsWith("/").optional().describe("Only pages whose path (without query string) begins with this prefix, e.g. /blog/."),
-        groupBy: z.enum(["path", "fullUrl"]).default("path").describe('"path" (default): one row per hostName + pagePath. "fullUrl": one row per pagePathPlusQueryString (query strings kept distinct).'),
+        groupBy: z.enum(["path", "fullUrl"]).default("path").describe('"path" (default): one row per hostName + pagePath. "fullUrl": one row per hostName + pagePathPlusQueryString (hostname + path + query string; query strings kept distinct).'),
       }),
       annotations: READ_ONLY,
     },
     async ({ propertyId, startDate, endDate, limit, offset, pagePath, groupBy }) => {
       try {
         const spec: ReportSpec = {
-          dimensions: groupBy === "fullUrl" ? ["pagePathPlusQueryString"] : ["hostName", "pagePath"],
+          dimensions: groupBy === "fullUrl" ? ["hostName", "pagePathPlusQueryString"] : ["hostName", "pagePath"],
           metrics: PAGE_METRICS,
           dateRange: resolveDateRange(startDate, endDate),
           limit,
