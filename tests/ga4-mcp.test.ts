@@ -12,9 +12,9 @@ const googleCalls: { url: string; body: any }[] = [];
 let reportResponse: () => Response;
 const okReport = (over: Record<string, unknown> = {}) =>
   Response.json({
-    dimensionHeaders: [{ name: "pagePathPlusQueryString" }],
+    dimensionHeaders: [{ name: "hostName" }, { name: "pagePathPlusQueryString" }],
     metricHeaders: [{ name: "screenPageViews", type: "TYPE_INTEGER" }],
-    rows: [{ dimensionValues: [{ value: "/blog/a?utm=1" }], metricValues: [{ value: "9" }] }],
+    rows: [{ dimensionValues: [{ value: "a.example.com" }, { value: "/blog/a?utm=1" }], metricValues: [{ value: "9" }] }],
     rowCount: 1,
     metadata: { timeZone: "Asia/Taipei" },
     ...over,
@@ -134,14 +134,14 @@ describe("tools", () => {
     reportResponse = () => okReport({ rowCount: 120 });
     const p = payload(await call("ga4_pages", { startDate: "2026-09-01", endDate: "2026-09-28", limit: 1, offset: 10, pagePath: "/blog/", groupBy: "fullUrl" }));
     const body = googleCalls[0]!.body;
-    expect(body.dimensions).toEqual([{ name: "pagePathPlusQueryString" }]);
+    expect(body.dimensions).toEqual([{ name: "hostName" }, { name: "pagePathPlusQueryString" }]);
     expect(body.limit).toBe("1");
     expect(body.offset).toBe("10");
-    expect(body.orderBys).toEqual([{ metric: { metricName: "screenPageViews" }, desc: true }, { dimension: { dimensionName: "pagePathPlusQueryString" } }]);
+    expect(body.orderBys).toEqual([{ metric: { metricName: "screenPageViews" }, desc: true }, { dimension: { dimensionName: "hostName" } }, { dimension: { dimensionName: "pagePathPlusQueryString" } }]);
     expect(body.dimensionFilter.filter).toMatchObject({ fieldName: "pagePath", stringFilter: { matchType: "BEGINS_WITH", value: "/blog/" } });
     expect(p.groupBy).toBe("fullUrl");
-    expect(p.dimensionHeaders).toEqual(["pagePathPlusQueryString"]);
-    expect(p.rows[0].dimensions.pagePathPlusQueryString).toBe("/blog/a?utm=1");
+    expect(p.dimensionHeaders).toEqual(["hostName", "pagePathPlusQueryString"]);
+    expect(p.rows[0].dimensions).toEqual({ hostName: "a.example.com", pagePathPlusQueryString: "/blog/a?utm=1" });
     expect(p.pagination).toEqual({ limit: 1, offset: 10, hasMore: true, nextOffset: 11 });
   });
   it("ga4_pages defaults to groupBy=path and asks Google to group by hostName + pagePath (no query string)", async () => {
@@ -183,22 +183,46 @@ describe("tools", () => {
     expect(hosts).toEqual(["www.example.com", "blog.example.com"]);
     expect(p.rows.map((r: any) => r.dimensions.pagePath)).toEqual(["/tools/calendar-generator/2027/", "/tools/calendar-generator/2027/"]);
   });
-  it("fullUrl mode keeps content-defining query parameters and tracking variants as separate rows", async () => {
-    reportResponse = () =>
-      Response.json({
-        dimensionHeaders: [{ name: "pagePathPlusQueryString" }],
-        metricHeaders: [{ name: "screenPageViews", type: "TYPE_INTEGER" }],
-        rows: [
-          { dimensionValues: [{ value: "/search?q=react" }], metricValues: [{ value: "7" }] },
-          { dimensionValues: [{ value: "/search?q=python" }], metricValues: [{ value: "5" }] },
-          { dimensionValues: [{ value: "/p/?share=tok" }], metricValues: [{ value: "3" }] },
-          { dimensionValues: [{ value: "/p/?fbclid=x" }], metricValues: [{ value: "2" }] },
-        ],
-        rowCount: 4,
-        metadata: {},
-      });
+  const fullUrlReport = (rows: [string, string, string, string?, string?][], over: Record<string, unknown> = {}) =>
+    Response.json({
+      dimensionHeaders: [{ name: "hostName" }, { name: "pagePathPlusQueryString" }],
+      metricHeaders: [{ name: "screenPageViews", type: "TYPE_INTEGER" }, { name: "activeUsers", type: "TYPE_INTEGER" }],
+      rows: rows.map(([h, u, v, a]) => ({ dimensionValues: [{ value: h }, { value: u }], metricValues: [{ value: v }, { value: a ?? "0" }] })),
+      rowCount: rows.length,
+      metadata: {},
+      ...over,
+    });
+  it("fullUrl mode: same / on two hosts stays two rows with Google's per-host values (never summed)", async () => {
+    // Pre-aggregated by Google per host; active users deliberately do not add up to any total.
+    reportResponse = () => fullUrlReport([["firstsun.heavenfortress.com", "/", "96", "40"], ["firstsun-blog.pages.dev", "/", "4", "3"]]);
+    const p = payload(await call("ga4_pages", { groupBy: "fullUrl" }));
+    expect(p.rows).toEqual([
+      { dimensions: { hostName: "firstsun.heavenfortress.com", pagePathPlusQueryString: "/" }, metrics: { screenPageViews: 96, activeUsers: 40 } },
+      { dimensions: { hostName: "firstsun-blog.pages.dev", pagePathPlusQueryString: "/" }, metrics: { screenPageViews: 4, activeUsers: 3 } },
+    ]);
+    expect(p.rowCount).toBe(2);
+    expect(p.groupBy).toBe("fullUrl");
+  });
+  it("fullUrl mode: identical path+query on two hosts stays two rows", async () => {
+    reportResponse = () => fullUrlReport([["a.example.com", "/p/?x=1", "5", "2"], ["b.example.com", "/p/?x=1", "3", "2"]]);
+    const p = payload(await call("ga4_pages", { groupBy: "fullUrl" }));
+    expect(p.rows.map((r: any) => [r.dimensions.hostName, r.dimensions.pagePathPlusQueryString])).toEqual([["a.example.com", "/p/?x=1"], ["b.example.com", "/p/?x=1"]]);
+  });
+  it("fullUrl mode: distinct query strings on one host stay distinct rows", async () => {
+    reportResponse = () => fullUrlReport([["h.example.com", "/search?q=react", "7"], ["h.example.com", "/search?q=python", "5"], ["h.example.com", "/p/?share=tok", "3"], ["h.example.com", "/p/?fbclid=x", "2"]]);
     const p = payload(await call("ga4_pages", { groupBy: "fullUrl" }));
     expect(p.rows.map((r: any) => r.dimensions.pagePathPlusQueryString)).toEqual(["/search?q=react", "/search?q=python", "/p/?share=tok", "/p/?fbclid=x"]);
+    expect(new Set(p.rows.map((r: any) => r.dimensions.hostName))).toEqual(new Set(["h.example.com"]));
+  });
+  it("fullUrl mode: pages through Google offset/limit with stable ordering on every dimension; metadata and empty reports pass through", async () => {
+    reportResponse = () => fullUrlReport([["a", "/", "1"]], { rowCount: 9, metadata: { subjectToThresholding: true, samplingMetadatas: [{ samplesReadCount: "1", samplingSpaceSize: "2" }] } });
+    const p = payload(await call("ga4_pages", { groupBy: "fullUrl", limit: 1, offset: 3 }));
+    expect(googleCalls[0]!.body.orderBys.map((o: any) => o.metric?.metricName ?? o.dimension.dimensionName)).toEqual(["screenPageViews", "hostName", "pagePathPlusQueryString"]);
+    expect(p.pagination).toEqual({ limit: 1, offset: 3, hasMore: true, nextOffset: 4 });
+    expect(p.metadata.subjectToThresholding).toBe(true);
+    expect(p.metadata.samplingMetadatas).toEqual([{ samplesReadCount: "1", samplingSpaceSize: "2" }]);
+    reportResponse = () => Response.json({ metricHeaders: [], rows: [], rowCount: 0, metadata: { emptyReason: "no data" } });
+    expect(payload(await call("ga4_pages", { groupBy: "fullUrl" }))).toMatchObject({ empty: true, groupBy: "fullUrl", rows: [] });
   });
   it("path mode applies the prefix filter to pagePath and pages through Google offset/limit", async () => {
     reportResponse = () => pathReport({ rowCount: 25 });
