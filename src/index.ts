@@ -4,8 +4,11 @@ import type { JWTVerifyGetKey } from "jose";
 import { authUnavailableResponse, unauthorizedResponse, verifyAccessAssertion } from "./auth/cloudflare-access";
 import { createServer } from "./server";
 
+/** The one canonical MCP endpoint path (`https://mcp.firstsun.org/anas`). Exact match only; see MCP_ROUTE handling below. */
+export const MCP_ROUTE = "/anas";
+
 /**
- * The only public hostname `/mcp` serves. The SDK validates `Host` only for localhost and `workers.dev` endpoints and
+ * The only public hostname `/anas` serves. The SDK validates `Host` only for localhost and `workers.dev` endpoints and
  * "relies on Cloudflare routing" for custom domains, so an authenticated request for any other Host that happened to
  * reach the Worker would otherwise be served. Localhost names are kept for `wrangler dev` and tests.
  */
@@ -31,7 +34,7 @@ export interface Env {
   GSC_ALLOWED_SITES?: string;
   /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`). Non-secret; owned by infra-config. */
   ACCESS_TEAM_DOMAIN?: string;
-  /** AUD tag of the Access application protecting `/mcp`. Non-secret; owned by infra-config. */
+  /** AUD tag of the Access application protecting `/anas`. Non-secret; owned by infra-config. */
   ACCESS_AUD?: string;
 }
 
@@ -43,6 +46,16 @@ export function createHandler(getKey?: JWTVerifyGetKey): ExportedHandler<Env> {
 
       if (request.method === "GET" && url.pathname === "/health") {
         return Response.json({ service: "anas-mcp", status: "ok" });
+      }
+
+      // Exact-path routing: the hostname is shared with other MCP services and `/mcp` is retired, so anything other than
+      // `/anas` (`/mcp`, `/anas2`, `/anas/`, `/anas/x`, typos) is a 404 with no JWKS fetch, MCP, or database work.
+      // Deliberately a plain 404 with no body detail; there is no redirect or alias.
+      if (url.pathname !== MCP_ROUTE) {
+        return new Response(JSON.stringify({ error: "not_found" }), {
+          status: 404,
+          headers: { "content-type": "application/json", "cache-control": "no-store" },
+        });
       }
 
       // Validate the Cloudflare Access assertion (Managed OAuth and Service Token both arrive as one) before MCP
@@ -62,7 +75,7 @@ export function createHandler(getKey?: JWTVerifyGetKey): ExportedHandler<Env> {
       // Origin, which the SDK still accepts). An empty allowlist rejects every present Origin, including the SDK's
       // default localhost-class origins. No wildcard Host/Origin is ever configured.
       return createMcpHandler(() => createServer(env), {
-        route: "/mcp",
+        route: MCP_ROUTE,
         allowedHostnames: MCP_ALLOWED_HOSTNAMES,
         allowedOriginHostnames: [],
       })(request, env, ctx);

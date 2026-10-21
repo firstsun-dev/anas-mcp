@@ -47,7 +47,7 @@ async function expectRejected(res: Response, leaks: string[] = []) {
   expect(pg.constructed).toBe(0);
 }
 
-describe("/mcp Cloudflare Access assertion validation", () => {
+describe("/anas Cloudflare Access assertion validation", () => {
   it("rejects a missing Cf-Access-Jwt-Assertion before MCP initialization", async () => {
     await expectRejected(await rawMcpRequest(makeEnv()));
   });
@@ -129,7 +129,7 @@ describe("/mcp Cloudflare Access assertion validation", () => {
         throw thrown;
       });
       const res = await flaky.fetch!(
-        new Request("http://localhost/mcp", {
+        new Request("http://localhost/anas", {
           method: "POST",
           headers: { "content-type": "application/json", accept: "application/json, text/event-stream", [A]: await signAssertion() },
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
@@ -177,7 +177,7 @@ describe("/health", () => {
 });
 
 describe("verifyAccessAssertion", () => {
-  const req = (assertion?: string) => new Request("http://localhost/mcp", { headers: assertion ? { [A]: assertion } : {} });
+  const req = (assertion?: string) => new Request("http://localhost/anas", { headers: assertion ? { [A]: assertion } : {} });
   const config = { teamDomain: TEST_TEAM_DOMAIN, audience: TEST_AUD };
 
   it("reports stable non-sensitive reason codes", async () => {

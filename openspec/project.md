@@ -5,7 +5,7 @@ Provide ChatGPT and other MCP clients with safe, read-only access to Firstsun an
 
 ## Authentication strategy
 
-Production `/mcp` supports **two Cloudflare Access authentication modes simultaneously on the same endpoint and Access application**. This is not a feature flag, fallback rollout, or environment-specific switch.
+Production `/anas` supports **two Cloudflare Access authentication modes simultaneously on the same endpoint and Access application**. This is not a feature flag, fallback rollout, or environment-specific switch.
 
 ### Mode A — interactive Managed OAuth
 - ChatGPT and other OAuth-capable MCP clients authenticate through Cloudflare Access Managed OAuth.
@@ -24,7 +24,7 @@ After either mode succeeds, the Worker SHALL validate the Access application JWT
 
 Do not use the transitional Worker-local `ANAS_MCP_API_KEY` gate as a production authentication path after this architecture is implemented. Do not use query-string secrets, OpenAI IP allowlists, User-Agent matching, or Cloudflare account/deployment API tokens for MCP authentication.
 
-`/health` MAY remain unauthenticated when Access protection is scoped specifically to `/mcp`; it must expose readiness only.
+`/health` MAY remain unauthenticated when Access protection is scoped specifically to `/anas`; it must expose readiness only.
 
 The active decision is `openspec/changes/support-dual-access-auth/`. The earlier `add-cloudflare-access-auth` and `use-mcp-api-key-auth` changes are retained as superseded historical decisions.
 
@@ -48,7 +48,7 @@ The HTTP surface is specified with **OpenAPI 3.2.0** in repository-root `openapi
 
 - `openapi.yaml` is the canonical HTTP API description for routes, methods, authentication requirements, status codes, content types, and stable payloads owned by `anas-mcp`.
 - Any HTTP surface change SHALL update `openapi.yaml` in the same change.
-- OpenAPI documents `/mcp` as an MCP Streamable HTTP transport endpoint; it SHALL NOT model each MCP tool as a fake REST endpoint.
+- OpenAPI documents `/anas` as an MCP Streamable HTTP transport endpoint; it SHALL NOT model each MCP tool as a fake REST endpoint.
 - MCP tool input/output contracts remain authoritative in MCP SDK/Zod schemas and are discovered through the MCP protocol.
 - CI SHALL validate `openapi.yaml` with an OpenAPI 3.2-capable validator before deployment once the project validation tool is selected.
 - Swagger/OpenAPI examples SHALL NOT include OAuth access tokens, Access JWT assertions, Service Token credentials, provider tokens, database secrets, or private analytics payloads.
@@ -173,7 +173,7 @@ MCP tool contracts
 ## Initial capability roadmap
 1. MCP foundation and health endpoint.
 2. OpenAPI 3.2 HTTP contract and automated validation.
-3. Concurrent dual-mode Cloudflare Access protection for production `/mcp`: Managed OAuth for interactive clients plus Service Tokens for headless agents.
+3. Concurrent dual-mode Cloudflare Access protection for production `/anas`: Managed OAuth for interactive clients plus Service Tokens for headless agents.
 4. Centralized Cloudflare Worker CI/CD caller using `firstsun-dev/.github`.
 5. Cloudflare Secrets Store binding and Google OAuth credential loading/access-token exchange.
 6. GA4 generic report, realtime, and metadata tools.

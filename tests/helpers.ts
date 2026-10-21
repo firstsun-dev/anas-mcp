@@ -45,7 +45,7 @@ export async function signAssertion(o: AssertionOptions = {}): Promise<string> {
 
 export function rawMcpRequest(env: Env, headers: Record<string, string> = {}, body: unknown = { method: "tools/list", params: {} }) {
   return worker.fetch!(
-    new Request("http://localhost/mcp", {
+    new Request("http://localhost/anas", {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", host: "localhost", ...headers },
       body: JSON.stringify({ jsonrpc: "2.0", id: ++id, ...(body as object) }),
