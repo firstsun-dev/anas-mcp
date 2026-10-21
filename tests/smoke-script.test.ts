@@ -14,8 +14,9 @@ const hasTools = ["bash", "jq"].every((t) => spawnSync("sh", ["-c", `command -v 
 const ISSUER = "https://team.example.test";
 const BASE = "https://mcp.example.test";
 const HEALTH = JSON.stringify({ service: "anas-mcp", status: "ok" });
-const PRM = JSON.stringify({ resource: `${BASE}/mcp`, authorization_servers: [ISSUER] });
+const PRM = JSON.stringify({ resource: `${BASE}/anas`, authorization_servers: [ISSUER] });
 const AS = JSON.stringify({ issuer: ISSUER, authorization_endpoint: `${ISSUER}/a`, token_endpoint: `${ISSUER}/t` });
+const NOT_FOUND = JSON.stringify({ error: "not_found" });
 const UNAUTH = JSON.stringify({ error: "invalid_token" });
 
 type Step = { exit?: number; status: string; body?: string };
@@ -25,8 +26,10 @@ const transport = (exit: number): Step => ({ exit, status: "000" }); // curl pri
 
 const healthy = (): Plan => ({
   "mcp.example.test/health": [ok("200", HEALTH)],
-  "mcp.example.test/mcp": [ok("401", UNAUTH)],
-  "mcp.example.test/.well-known/cloudflare-access-protected-resource/mcp": [ok("200", PRM)],
+  "mcp.example.test/anas": [ok("401", UNAUTH)],
+  "mcp.example.test/mcp": [ok("404", NOT_FOUND)],
+  "mcp.example.test/anas2": [ok("404", NOT_FOUND)],
+  "mcp.example.test/.well-known/cloudflare-access-protected-resource/anas": [ok("200", PRM)],
   "team.example.test/.well-known/oauth-authorization-server": [ok("200", AS)],
 });
 
@@ -126,19 +129,19 @@ describe.skipIf(!hasTools)("scripts/smoke-prod.sh (mock curl)", () => {
     expect(r.stdout + r.stderr).toContain("got HTTP 503");
   });
 
-  it("does not retry definitive 4xx answers (401 on /mcp is the expected pass; 404 on health fails fast)", () => {
+  it("does not retry definitive 4xx answers (401 on /anas is the expected pass; 404 on health fails fast)", () => {
     const plan = healthy();
     plan["mcp.example.test/health"] = [ok("404")];
     const r = run(plan);
     expect(r.status).toBe(1);
     expect(r.calls("mcp.example.test/health")).toBe(1);
-    expect(r.calls("mcp.example.test/mcp")).toBe(1);
+    expect(r.calls("mcp.example.test/anas")).toBe(1);
   });
 
-  it("fails when unauthenticated /mcp is accepted (200) or leaks tools", () => {
+  it("fails when unauthenticated /anas is accepted (200) or leaks tools", () => {
     for (const step of [ok("200", JSON.stringify({ result: { tools: [] } })), ok("401", '{"tools":[]}')]) {
       const plan = healthy();
-      plan["mcp.example.test/mcp"] = [step];
+      plan["mcp.example.test/anas"] = [step];
       expect(run(plan).status).toBe(1);
       rmSync(join(dir, "calls.log"), { force: true });
     }
@@ -146,13 +149,28 @@ describe.skipIf(!hasTools)("scripts/smoke-prod.sh (mock curl)", () => {
 
   it("fails when the authorization server or issuer does not match the configured Access issuer", () => {
     const wrongPrm = healthy();
-    wrongPrm["mcp.example.test/.well-known/cloudflare-access-protected-resource/mcp"] = [
-      ok("200", JSON.stringify({ resource: `${BASE}/mcp`, authorization_servers: ["https://evil.example.test"] })),
+    wrongPrm["mcp.example.test/.well-known/cloudflare-access-protected-resource/anas"] = [
+      ok("200", JSON.stringify({ resource: `${BASE}/anas`, authorization_servers: ["https://evil.example.test"] })),
     ];
     expect(run(wrongPrm).status).toBe(1);
     rmSync(join(dir, "calls.log"), { force: true });
     const wrongAs = healthy();
     wrongAs["team.example.test/.well-known/oauth-authorization-server"] = [ok("200", JSON.stringify({ ...JSON.parse(AS), issuer: "https://evil.example.test" }))];
     expect(run(wrongAs).status).toBe(1);
+  });
+
+  it.each(["mcp", "anas2"])("fails when /%s still serves MCP (2xx or tools) and passes on 401/403/404", (path) => {
+    for (const step of [ok("200", JSON.stringify({ result: { tools: [] } })), ok("404", '{"tools":[]}'), ok("302")]) {
+      const plan = healthy();
+      plan[`mcp.example.test/${path}`] = [step];
+      expect(run(plan).status, `${path} ${step.status}`).toBe(1);
+      rmSync(join(dir, "calls.log"), { force: true });
+    }
+    for (const status of ["401", "403", "404"]) {
+      const plan = healthy();
+      plan[`mcp.example.test/${path}`] = [ok(status, NOT_FOUND)];
+      expect(run(plan).status, `${path} ${status}`).toBe(0);
+      rmSync(join(dir, "calls.log"), { force: true });
+    }
   });
 });

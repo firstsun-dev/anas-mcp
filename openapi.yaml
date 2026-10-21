@@ -11,7 +11,8 @@ info:
     server implementation and its MCP/Zod contracts; they are not modeled as
     fake REST endpoints here.
 
-    Production `/mcp` is protected by one Cloudflare Access application that
+    Production `https://mcp.firstsun.org/anas` (the only MCP endpoint; `/mcp` was retired with no alias or
+    redirect, see openspec/changes/migrate-mcp-endpoint-to-anas) is protected by one Cloudflare Access application that
     concurrently accepts two authentication modes: Mode A, Managed OAuth
     (interactive clients such as ChatGPT), and Mode B, Access Service Tokens
     (headless agents and automation). Cloudflare Access evaluates the client
@@ -56,7 +57,7 @@ paths:
                   value:
                     service: anas-mcp
                     status: ok
-  /mcp:
+  /anas:
     post:
       operationId: handleMcp
       tags: [MCP]
@@ -146,7 +147,12 @@ paths:
                   value:
                     error: auth_unavailable
         '404':
-          description: Route not found or request is not valid for the configured MCP route
+          description: >-
+            Returned for any path other than the exact `/anas` (including
+            the retired `/mcp`, prefix collisions such as `/anas2`, a trailing
+            slash, and sub-paths), before authentication and with no MCP,
+            JWKS, or database work. Also used by the SDK for requests that are
+            not valid for the MCP route.
         '405':
           description: HTTP method not supported by the configured stateless transport
 components:
@@ -160,9 +166,9 @@ components:
         code + PKCE). Cloudflare Access, not this Worker, serves the actual
         `authorization_endpoint` and `token_endpoint`. Per Cloudflare's own
         documentation these are NOT fixed, published endpoints: a client MUST
-        discover them. Discovery sequence: (1) an unauthenticated `POST /mcp`
+        discover them. Discovery sequence: (1) an unauthenticated `POST /anas`
         returns `401` whose `WWW-Authenticate` carries `resource_metadata=
-        "https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp"`
+        "https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/anas"`
         (RFC 9728); that document lists `authorization_servers:
         ["https://firstsun.cloudflareaccess.com"]`; (2) the client fetches that
         issuer's RFC 8414 metadata, which is `oauth2MetadataUrl` above, and uses

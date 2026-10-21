@@ -101,7 +101,7 @@ Before introducing any credential, answer:
 
 ## MCP client authentication (no Worker-held credential)
 
-Production `/mcp` authentication is Cloudflare Access (Managed OAuth and Service Token, concurrently; see `docs/mcp-authentication.md`). It adds **no** credential to the Worker or its Secrets Store.
+Production `/anas` authentication is Cloudflare Access (Managed OAuth and Service Token, concurrently; see `docs/mcp-authentication.md`). It adds **no** credential to the Worker or its Secrets Store.
 
 | Material | Owner / location |
 | --- | --- |

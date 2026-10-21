@@ -1,5 +1,5 @@
 /**
- * Cloudflare Access origin validation for `/mcp`.
+ * Cloudflare Access origin validation for `/anas`.
  *
  * Both production auth modes (Managed OAuth and Access Service Token) terminate at Cloudflare Access, which then
  * forwards the request with a signed application assertion in `Cf-Access-Jwt-Assertion`. The Worker never inspects
@@ -16,7 +16,7 @@ export const ACCESS_ASSERTION_HEADER = "cf-access-jwt-assertion";
 export interface AccessConfig {
   /** Cloudflare Zero Trust team domain, e.g. `<team>.cloudflareaccess.com` (non-secret). */
   teamDomain?: string;
-  /** Audience (AUD) tag of the Access application protecting `/mcp` (non-secret). */
+  /** Audience (AUD) tag of the Access application protecting `/anas` (non-secret). */
   audience?: string;
 }
 

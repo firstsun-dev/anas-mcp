@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 
 const spec = parse(readFileSync(new URL("../openapi.yaml", import.meta.url), "utf8")) as {
   components: { securitySchemes: Record<string, Record<string, unknown>> };
-  paths: { "/mcp": { post: { security: Record<string, unknown>[] } } };
+  paths: { "/anas": { post: { security: Record<string, unknown>[] } } };
 };
 
-const RESOURCE = "https://mcp.firstsun.org/mcp";
-const PRM_URL = "https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/mcp";
+const RESOURCE = "https://mcp.firstsun.org/anas";
+const PRM_URL = "https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/anas";
 const AS_ISSUER = "https://firstsun.cloudflareaccess.com";
 const AS_METADATA_URL = `${AS_ISSUER}/.well-known/oauth-authorization-server`;
 
@@ -48,7 +48,7 @@ describe("openapi.yaml Cloudflare Access OAuth security scheme", () => {
   });
 
   it("/mcp requires Managed OAuth (Mode A) OR both Service Token headers together (Mode B), never a third mode", () => {
-    const security = spec.paths["/mcp"].post.security;
+    const security = spec.paths["/anas"].post.security;
     expect(security).toHaveLength(2);
     expect(security[0]).toEqual({ CloudflareAccessOAuth: [] });
     expect(security[1]).toEqual({
@@ -101,7 +101,7 @@ describe("OAuth discovery chain (RFC 9728 -> RFC 8414), mocked responses", () =>
     const schemes = spec.components.securitySchemes;
     expect(schemes.CloudflareAccessServiceTokenId).toMatchObject({ type: "apiKey", in: "header", name: "CF-Access-Client-Id" });
     expect(schemes.CloudflareAccessServiceTokenSecret).toMatchObject({ type: "apiKey", in: "header", name: "CF-Access-Client-Secret" });
-    const security = spec.paths["/mcp"].post.security;
+    const security = spec.paths["/anas"].post.security;
     expect(security).toHaveLength(2);
     expect(Object.keys(security[0])).toEqual(["CloudflareAccessOAuth"]);
     expect(Object.keys(security[1]).sort()).toEqual(["CloudflareAccessServiceTokenId", "CloudflareAccessServiceTokenSecret"]);

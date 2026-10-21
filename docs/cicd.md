@@ -94,13 +94,17 @@ env.VERSION ("(hidden)")           Environment Variable
 
 **Residual risk (not verifiable without deploying):** `workers_dev: false` and `preview_urls: false` are, to our understanding of Wrangler, applied by `wrangler deploy`, not by `versions upload`/`versions deploy` (not verified without deploying). The template never runs `wrangler deploy`, so these settings are not re-asserted on each release; they rely on the Worker's current subdomain/preview-URL state. Operators must confirm in the Cloudflare dashboard (Worker → Settings → Domains & Routes) that the `workers.dev` route and Preview URLs are disabled, and the custom domain `mcp.firstsun.org` is attached. Fixing this generically would be a change to `firstsun-dev/.github` and is out of scope here.
 
+## Endpoint-path migration ordering
+
+A push to `main` deploys production immediately. The `/mcp` -> `/anas` change must not be merged until `infra-config` has applied the Access path update (see `infra-config/docs/mcp-anas-path-cutover.md`); otherwise the `smoke` job fails on the missing `/anas` protected-resource metadata (the Worker itself stays fail-closed). The smoke job also asserts `/mcp` and `/anas2` serve nothing.
+
 ## Smoke tests and rollback
 
-The template's `verify_cmd` path installs Playwright and, on failure, runs `wrangler versions deploy <previous>@100`. For this service that is unsafe: the previous version may predate Cloudflare Access authentication, so an automatic revert could reopen `/mcp` with a weaker gate. `verify_cmd` is therefore unset and the caller adds an application-specific `smoke` job (`scripts/smoke-prod.sh`; GitHub-hosted, no secrets, `contents: read`) that runs after a successful `pipeline` and checks, with unauthenticated requests only:
+The template's `verify_cmd` path installs Playwright and, on failure, runs `wrangler versions deploy <previous>@100`. For this service that is unsafe: the previous version may predate Cloudflare Access authentication, so an automatic revert could reopen `/anas` with a weaker gate. `verify_cmd` is therefore unset and the caller adds an application-specific `smoke` job (`scripts/smoke-prod.sh`; GitHub-hosted, no secrets, `contents: read`) that runs after a successful `pipeline` and checks, with unauthenticated requests only:
 
 1. `GET /health` is `200` with `{service: "anas-mcp", status: "ok"}`.
-2. `POST /mcp` without credentials is `401`/`403` and returns no `tools`.
-3. `GET /.well-known/cloudflare-access-protected-resource/mcp` returns `200` with `resource == https://mcp.firstsun.org/mcp` and the Access issuer in `authorization_servers`.
+2. `POST /anas` without credentials is `401`/`403` and returns no `tools`; `POST /mcp` and `POST /anas2` are `401`/`403`/`404` and return no `tools`.
+3. `GET /.well-known/cloudflare-access-protected-resource/anas` returns `200` with `resource == https://mcp.firstsun.org/anas` and the Access issuer in `authorization_servers`.
 4. `GET <issuer>/.well-known/oauth-authorization-server` is reachable and its `issuer` equals `https://firstsun.cloudflareaccess.com` (the `ACCESS_TEAM_DOMAIN` in `wrangler.jsonc`; a test guards drift).
 
 Transport errors (DNS, connect, timeout) and HTTP `5xx` are retried up to 6 requests per check with a 5 s delay (bounded; curl's exit status is handled separately from its HTTP status). `tests/smoke-script.test.ts` exercises the script with a mock `curl` (DNS error, connection failure, timeout, `502` then `200`, persistent `503`, success, and rejection cases); it is skipped where `bash`/`jq` are missing. On failure the job fails the run with "OPERATOR INTERVENTION REQUIRED".
@@ -154,7 +158,7 @@ export CF_ACCESS_CLIENT_ID=...        # from the operator's secret store
 export CF_ACCESS_CLIENT_SECRET=...
 H=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
    -H 'content-type: application/json' -H 'accept: application/json, text/event-stream')
-URL=https://mcp.firstsun.org/mcp
+URL=https://mcp.firstsun.org/anas
 curl -sS "${H[@]}" $URL -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"acceptance","version":"0"}}}'
 curl -sS "${H[@]}" $URL -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 curl -sS "${H[@]}" $URL -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"bing_list_sites","arguments":{}}}'

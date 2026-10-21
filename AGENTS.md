@@ -4,10 +4,10 @@
 `anas-mcp` is Firstsun's read-only analytics MCP service running on Cloudflare Workers.
 
 ## Architecture invariants
-- Expose MCP over stateless Streamable HTTP at `/mcp` using `createMcpHandler()`.
+- Expose MCP over stateless Streamable HTTP at `/anas` using `createMcpHandler()`.
 - **HTTP API contract uses OpenAPI 3.2.0.** Keep repository-root `openapi.yaml` synchronized with every HTTP route/method/auth/status/content-type/stable-payload change. Swagger-compatible tooling is the expected rendering ecosystem. See `docs/api.md` and `openspec/changes/adopt-openapi-http-contract/`.
 - Do not model MCP tools as fake REST endpoints merely to expose them in Swagger. MCP tool schemas remain authoritative in MCP/Zod; OpenAPI documents the HTTP transport surface.
-- **Production MCP authentication is concurrent dual-mode Cloudflare Access.** One Access application protects `https://mcp.firstsun.org/mcp` and accepts **Mode A, Managed OAuth** (ChatGPT/OAuth clients) and **Mode B, Access Service Token** (headless agents) at the same time. This is not a toggle, fallback chain, or two endpoints. The Worker validates `Cf-Access-Jwt-Assertion` (`src/auth/cloudflare-access.ts`: JWKS signature, issuer/team domain, application AUD, exp/nbf) before MCP initialization, `createServer()`, or any tool/database access, and does not distinguish OAuth from Service Token. See `docs/mcp-authentication.md`, `docs/cloudflare-access.md`, and `openspec/changes/support-dual-access-auth/`. `use-mcp-api-key-auth` and `add-cloudflare-access-auth` are superseded historical rationale only.
+- **Production MCP authentication is concurrent dual-mode Cloudflare Access.** One Access application protects `https://mcp.firstsun.org/anas` and accepts **Mode A, Managed OAuth** (ChatGPT/OAuth clients) and **Mode B, Access Service Token** (headless agents) at the same time. This is not a toggle, fallback chain, or two endpoints. The Worker validates `Cf-Access-Jwt-Assertion` (`src/auth/cloudflare-access.ts`: JWKS signature, issuer/team domain, application AUD, exp/nbf) before MCP initialization, `createServer()`, or any tool/database access, and does not distinguish OAuth from Service Token. See `docs/mcp-authentication.md`, `docs/cloudflare-access.md`, and `openspec/changes/support-dual-access-auth/`. `use-mcp-api-key-auth` and `add-cloudflare-access-auth` are superseded historical rationale only.
 - **Cloudflare configuration is owned by `firstsun-dev/infra-config`** (custom domain, Access application, Managed OAuth, policies, Service Tokens; Terraform only). Do not provision or mutate Cloudflare Access resources from this repository. The Worker's only auth configuration is the non-secret `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD` vars.
 - The Worker-local `ANAS_MCP_API_KEY` Secrets Store gate from PR #8 is removed and must not return as a third mode. Never read or compare `Authorization`, `CF-Access-Client-Id`, or `CF-Access-Client-Secret` in the Worker, and never log or return `Authorization`, `Cf-Access-Jwt-Assertion`, `CF-Access-Client-*`, or any single-header Service Token header. Never substitute `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, provider/database credentials, or CI deployment tokens for MCP authentication.
 - Do not accept MCP credentials via query string, replace Access with OpenAI IP allowlisting or User-Agent checks, or add a Worker-side OAuth server, `@cloudflare/workers-oauth-provider`, `OAUTH_KV`, D1, Durable Objects, or PostgreSQL auth tables unless an accepted OpenSpec change supersedes the current decision.
@@ -49,7 +49,7 @@ pnpm run check
 
 For HTTP surface changes, also validate `openapi.yaml` with `pnpm run lint:openapi` (wired into `pnpm run check`; see `docs/api.md#validation`) and ensure Swagger-compatible rendering remains valid.
 
-For MCP behavior changes also run the Worker locally and validate `/mcp` using MCP Inspector. Production authentication is not verified until the deployed system has been tested through Cloudflare Access with Managed OAuth and a Service Token (concurrently), a blocked identity, and an invalid/revoked Service Token; ChatGPT compatibility must not be claimed unless actually tested from ChatGPT.
+For MCP behavior changes also run the Worker locally and validate `/anas` using MCP Inspector. Production authentication is not verified until the deployed system has been tested through Cloudflare Access with Managed OAuth and a Service Token (concurrently), a blocked identity, and an invalid/revoked Service Token; ChatGPT compatibility must not be claimed unless actually tested from ChatGPT.
 
 CI/CD work is not complete until the thin caller has been validated against the current `firstsun-dev/.github` reusable workflow contract. Do not claim deploy compatibility until package-manager behavior, required inputs, and target environment URLs have actually been verified.
 
@@ -58,7 +58,7 @@ CI/CD work is not complete until the thin caller has been validated against the 
 - TypeScript typecheck passes.
 - HTTP surface and `openapi.yaml` are synchronized.
 - No credentials, tokens, private keys, database URLs, Access assertions, OAuth/Service Token credentials, `Authorization` headers, or raw analytics payloads are committed or logged.
-- Production `/mcp` remains behind Cloudflare Access (Managed OAuth and Service Token concurrently) with Worker-side assertion validation unless an accepted OpenSpec change supersedes it.
+- Production `/anas` remains behind Cloudflare Access (Managed OAuth and Service Token concurrently) with Worker-side assertion validation unless an accepted OpenSpec change supersedes it.
 - Production/development Worker deployment remains delegated to `firstsun-dev/.github` reusable CI unless an accepted OpenSpec change documents an exception.
 - Long-lived Worker-consumed credentials use Cloudflare Secrets Store unless an accepted exception is documented.
 - Tool contracts have bounded inputs and predictable output shapes.

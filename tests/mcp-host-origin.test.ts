@@ -3,7 +3,7 @@ import type { Env } from "../src/index";
 import { accessEnv, handler, signAssertion } from "./helpers";
 
 // Host/Origin behavior of the real Cloudflare Agents SDK handler (agents@0.22) as configured in src/index.ts, driven
-// against the production URL https://mcp.firstsun.org/mcp. Nothing here mocks the SDK's validation.
+// against the production URL https://mcp.firstsun.org/anas. Nothing here mocks the SDK's validation.
 const pg = vi.hoisted(() => ({ constructed: 0 }));
 vi.mock("pg", () => ({
   Client: class {
@@ -21,7 +21,7 @@ vi.mock("pg", () => ({
 const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
 const hyperdrive = { connectionString: "postgres://hyperdrive.invalid/db" } as unknown as Hyperdrive;
 const env = (): Env => accessEnv({ ANALYTICS_DB: hyperdrive });
-const PROD = "https://mcp.firstsun.org/mcp";
+const PROD = "https://mcp.firstsun.org/anas";
 
 beforeEach(() => {
   pg.constructed = 0;
@@ -56,7 +56,7 @@ describe("MCP Host validation on the production endpoint", () => {
   it.each(["evil.example", "mcp.firstsun.org.evil.example", "firstsun.org", "anas-mcp.example.workers.dev", "203.0.113.7"])(
     "rejects an authenticated request for unexpected Host %s with 403 and no MCP/database work",
     async (host) => {
-      const res = await call(`https://${host}/mcp`, { host });
+      const res = await call(`https://${host}/anas`, { host });
       expect(res.status).toBe(403);
       expect(await res.text()).toMatch(/Invalid Host/);
       expect(pg.constructed).toBe(0);
@@ -147,7 +147,7 @@ describe("MCP Origin validation (no browser clients are supported)", () => {
 describe("authentication is evaluated before Host/Origin/MCP/database work", () => {
   it("returns the generic 401 with no assertion, regardless of Host or Origin", async () => {
     for (const headers of [{ host: "mcp.firstsun.org" }, { host: "evil.example" }, { host: "mcp.firstsun.org", origin: "https://evil.example" }]) {
-      const res = await call(`https://${headers.host}/mcp`, headers, { assertion: false });
+      const res = await call(`https://${headers.host}/anas`, headers, { assertion: false });
       expect(res.status).toBe(401);
       expect(await res.json()).toEqual({ error: "unauthorized" });
       expect(pg.constructed).toBe(0);
@@ -165,6 +165,6 @@ describe("public GET /health", () => {
   });
   it("does not expose MCP on /health for non-GET methods", async () => {
     const res = await call("https://mcp.firstsun.org/health", {}, { assertion: false, method: "POST" });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
   });
 });

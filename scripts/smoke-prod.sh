@@ -3,7 +3,7 @@
 #
 # Sends only unauthenticated GET/POST requests and carries no credentials. It deliberately does NOT roll back:
 # a previous Worker version may predate Cloudflare Access authentication, so an automatic revert could re-expose
-# `/mcp` with a weaker gate. A failure therefore only fails the pipeline and asks for operator intervention.
+# `/anas` with a weaker gate. A failure therefore only fails the pipeline and asks for operator intervention.
 #
 # Env: BASE_URL (default https://mcp.firstsun.org), EXPECTED_ISSUER (required; the Access authorization server).
 set -uo pipefail
@@ -40,17 +40,29 @@ if [[ "$code" == "200" ]] && jq -e '.status == "ok" and .service == "anas-mcp"' 
   pass "/health returned 200 ok"
 else fail "/health expected 200 {service:anas-mcp,status:ok}, got HTTP $code"; fi
 
-# 2. Unauthenticated /mcp must be rejected and must not return an MCP result.
-code="$(fetch "$tmp/mcp" -X POST "$BASE_URL/mcp" -H 'content-type: application/json' \
-  -H 'accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')"
-if [[ "$code" == "401" || "$code" == "403" ]] && ! grep -q '"tools"' "$tmp/mcp"; then
-  pass "unauthenticated /mcp rejected with HTTP $code"
-else fail "unauthenticated /mcp must be 401/403 without tools, got HTTP $code"; fi
+# 2. Unauthenticated /anas must be rejected and must not return an MCP result.
+mcp_probe() { # <outfile> <path>
+  fetch "$1" -X POST "$BASE_URL$2" -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+}
+code="$(mcp_probe "$tmp/anas" /anas)"
+if [[ "$code" == "401" || "$code" == "403" ]] && ! grep -q '"tools"' "$tmp/anas"; then
+  pass "unauthenticated /anas rejected with HTTP $code"
+else fail "unauthenticated /anas must be 401/403 without tools, got HTTP $code"; fi
+
+# 2b. The retired /mcp path and a prefix-collision path must not serve MCP. Any 401/403/404 without tools is
+# acceptable (which one depends on whether Access still covers the path); a 2xx or tool listing is a failure.
+for path in /mcp /anas2; do
+  code="$(mcp_probe "$tmp/neg" "$path")"
+  if [[ "$code" =~ ^(401|403|404)$ ]] && ! grep -q '"tools"' "$tmp/neg"; then
+    pass "$path is not an MCP endpoint (HTTP $code)"
+  else fail "$path must be 401/403/404 without tools, got HTTP $code"; fi
+done
 
 # 3. OAuth Protected Resource Metadata (RFC 9728), served by Cloudflare Access.
-code="$(fetch "$tmp/prm" "$BASE_URL/.well-known/cloudflare-access-protected-resource/mcp")"
-if [[ "$code" == "200" ]] && jq -e --arg r "$BASE_URL/mcp" --arg i "$EXPECTED_ISSUER" \
+code="$(fetch "$tmp/prm" "$BASE_URL/.well-known/cloudflare-access-protected-resource/anas")"
+if [[ "$code" == "200" ]] && jq -e --arg r "$BASE_URL/anas" --arg i "$EXPECTED_ISSUER" \
   '.resource == $r and (.authorization_servers | index($i)) != null' "$tmp/prm" >/dev/null 2>&1; then
   pass "protected-resource metadata valid; authorization server is $EXPECTED_ISSUER"
 else fail "protected-resource metadata invalid or authorization server != $EXPECTED_ISSUER (HTTP $code)"; fi
