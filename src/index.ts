@@ -4,11 +4,11 @@ import type { JWTVerifyGetKey } from "jose";
 import { authUnavailableResponse, unauthorizedResponse, verifyAccessAssertion } from "./auth/cloudflare-access";
 import { createServer } from "./server";
 
-/** The one canonical MCP endpoint path (`https://mcp.firstsun.org/anas`). Exact match only; see MCP_ROUTE handling below. */
-export const MCP_ROUTE = "/anas";
+/** The one canonical MCP endpoint path (`https://mcp.firstsun.org/anas/mcp`). Exact match only; see MCP_ROUTE handling below. */
+export const MCP_ROUTE = "/anas/mcp";
 
 /**
- * The only public hostname `/anas` serves. The SDK validates `Host` only for localhost and `workers.dev` endpoints and
+ * The only public hostname `/anas/mcp` serves. The SDK validates `Host` only for localhost and `workers.dev` endpoints and
  * "relies on Cloudflare routing" for custom domains, so an authenticated request for any other Host that happened to
  * reach the Worker would otherwise be served. Localhost names are kept for `wrangler dev` and tests.
  */
@@ -34,7 +34,7 @@ export interface Env {
   GSC_ALLOWED_SITES?: string;
   /** Cloudflare Access team domain (`<team>.cloudflareaccess.com`). Non-secret; owned by infra-config. */
   ACCESS_TEAM_DOMAIN?: string;
-  /** AUD tag of the Access application protecting `/anas`. Non-secret; owned by infra-config. */
+  /** AUD tag of the Access application protecting `/anas/mcp`. Non-secret; owned by infra-config. */
   ACCESS_AUD?: string;
 }
 
@@ -49,7 +49,7 @@ export function createHandler(getKey?: JWTVerifyGetKey): ExportedHandler<Env> {
       }
 
       // Exact-path routing: the hostname is shared with other MCP services and `/mcp` is retired, so anything other than
-      // `/anas` (`/mcp`, `/anas2`, `/anas/`, `/anas/x`, typos) is a 404 with no JWKS fetch, MCP, or database work.
+      // `/anas/mcp` (`/mcp`, `/anas2`, `/anas/`, `/anas/x`, typos) is a 404 with no JWKS fetch, MCP, or database work.
       // Deliberately a plain 404 with no body detail; there is no redirect or alias.
       if (url.pathname !== MCP_ROUTE) {
         return new Response(JSON.stringify({ error: "not_found" }), {

@@ -48,7 +48,7 @@ describe("MCP tool registration", () => {
     expect(names).not.toContain("bing_url_info");
     for (const n of names) expect(n).not.toMatch(/submit|delete|update|create|sitemap|add|remove|verify|configure|request|sql|query|execute/i);
   });
-  it("adds no HTTP route beyond /health and /anas", async () => {
+  it("adds no HTTP route beyond /health and /anas/mcp", async () => {
     const { default: worker } = await import("../src/index");
     const res = await worker.fetch(new Request("http://localhost/bing"), {}, {} as ExecutionContext);
     expect(res.status).not.toBe(200);

@@ -3,7 +3,7 @@
 #
 # Sends only unauthenticated GET/POST requests and carries no credentials. It deliberately does NOT roll back:
 # a previous Worker version may predate Cloudflare Access authentication, so an automatic revert could re-expose
-# `/anas` with a weaker gate. A failure therefore only fails the pipeline and asks for operator intervention.
+# `/anas/mcp` with a weaker gate. A failure therefore only fails the pipeline and asks for operator intervention.
 #
 # Env: BASE_URL (default https://mcp.firstsun.org), EXPECTED_ISSUER (required; the Access authorization server).
 set -uo pipefail
@@ -40,32 +40,37 @@ if [[ "$code" == "200" ]] && jq -e '.status == "ok" and .service == "anas-mcp"' 
   pass "/health returned 200 ok"
 else fail "/health expected 200 {service:anas-mcp,status:ok}, got HTTP $code"; fi
 
-# 2. Unauthenticated /anas must be rejected and must not return an MCP result.
-mcp_probe() { # <outfile> <path>
-  fetch "$1" -X POST "$BASE_URL$2" -H 'content-type: application/json' \
+# 2. Unauthenticated /anas/mcp must be rejected and must not return an MCP result. The response headers are kept: the
+# Access challenge advertises the protected-resource metadata URL, which step 3 follows (never a hardcoded path).
+mcp_probe() { # <outfile> <path> [header-file]
+  local out="$1" path="$2" hdr="${3:-/dev/null}"
+  fetch "$out" -D "$hdr" -X POST "$BASE_URL$path" -H 'content-type: application/json' \
     -H 'accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 }
-code="$(mcp_probe "$tmp/anas" /anas)"
+code="$(mcp_probe "$tmp/anas" /anas/mcp "$tmp/anas.hdr")"
 if [[ "$code" == "401" || "$code" == "403" ]] && ! grep -q '"tools"' "$tmp/anas"; then
-  pass "unauthenticated /anas rejected with HTTP $code"
-else fail "unauthenticated /anas must be 401/403 without tools, got HTTP $code"; fi
+  pass "unauthenticated /anas/mcp rejected with HTTP $code"
+else fail "unauthenticated /anas/mcp must be 401/403 without tools, got HTTP $code"; fi
 
-# 2b. The retired /mcp path and a prefix-collision path must not serve MCP. Any 401/403/404 without tools is
-# acceptable (which one depends on whether Access still covers the path); a 2xx or tool listing is a failure.
-for path in /mcp /anas2; do
+# 2b. The retired /mcp and bare /anas paths and prefix-collision paths must not serve MCP. Any 401/403/404 without
+# tools is acceptable (which one depends on whether Access covers the path); a 2xx or tool listing is a failure.
+for path in /mcp /anas /anas/mcp/ /anas/mcp2 /anas2/mcp /infra/mcp; do
   code="$(mcp_probe "$tmp/neg" "$path")"
   if [[ "$code" =~ ^(401|403|404)$ ]] && ! grep -q '"tools"' "$tmp/neg"; then
     pass "$path is not an MCP endpoint (HTTP $code)"
   else fail "$path must be 401/403/404 without tools, got HTTP $code"; fi
 done
 
-# 3. OAuth Protected Resource Metadata (RFC 9728), served by Cloudflare Access.
-code="$(fetch "$tmp/prm" "$BASE_URL/.well-known/cloudflare-access-protected-resource/anas")"
-if [[ "$code" == "200" ]] && jq -e --arg r "$BASE_URL/anas" --arg i "$EXPECTED_ISSUER" \
+# 3. OAuth Protected Resource Metadata (RFC 9728), served by Cloudflare Access and discovered from the challenge.
+prm_url="$(tr -d '\r' < "$tmp/anas.hdr" 2>/dev/null | grep -i '^www-authenticate:' | sed -n 's/.*resource_metadata="\([^"]*\)".*/\1/p' | head -n1)"
+if [[ "$prm_url" == "$BASE_URL/"* ]]; then
+  code="$(fetch "$tmp/prm" "$prm_url")"
+else code="000"; fi
+if [[ "$code" == "200" ]] && jq -e --arg r "$BASE_URL/anas/mcp" --arg i "$EXPECTED_ISSUER" \
   '.resource == $r and (.authorization_servers | index($i)) != null' "$tmp/prm" >/dev/null 2>&1; then
   pass "protected-resource metadata valid; authorization server is $EXPECTED_ISSUER"
-else fail "protected-resource metadata invalid or authorization server != $EXPECTED_ISSUER (HTTP $code)"; fi
+else fail "protected-resource metadata not advertised on $BASE_URL, invalid, resource != $BASE_URL/anas/mcp, or authorization server != $EXPECTED_ISSUER (HTTP $code)"; fi
 
 # 4. Authorization Server Metadata (RFC 8414) reachable and issuer matches the configured Access issuer.
 code="$(fetch "$tmp/as" "$EXPECTED_ISSUER/.well-known/oauth-authorization-server")"

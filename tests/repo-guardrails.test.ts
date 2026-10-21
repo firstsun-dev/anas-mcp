@@ -70,7 +70,7 @@ describe("repository guardrails", () => {
   it("workers.dev and Version/Preview URLs are disabled so Access on the custom domain cannot be bypassed", () => {
     // workers.dev and Version/Preview URLs are a separate ingress that does not go through the Access
     // application attached to the custom domain. If either were left enabled (or omitted, since `workers_dev`
-    // defaults to `true` when no `routes`/`route` field is configured here), `/anas` would be reachable without
+    // defaults to `true` when no `routes`/`route` field is configured here), `/anas/mcp` would be reachable without
     // a Cloudflare Access assertion. See wrangler.jsonc and docs/cloudflare-access.md.
     const config = JSON.parse(stripComments(read("wrangler.jsonc"))) as Record<string, any>;
     expect(config.workers_dev).toBe(false);
