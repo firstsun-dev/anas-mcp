@@ -3,11 +3,11 @@
 ## Requirements
 
 ### Requirement: Remote MCP transport
-The service SHALL expose a stateless MCP endpoint at `/anas` on Cloudflare Workers using Streamable HTTP.
+The service SHALL expose a stateless MCP endpoint at `/anas/mcp` on Cloudflare Workers using Streamable HTTP.
 
 #### Scenario: MCP client connects
 - GIVEN the Worker is deployed
-- WHEN an MCP-compatible client connects to `/anas`
+- WHEN an MCP-compatible client connects to `/anas/mcp`
 - THEN the client can complete MCP initialization and list available tools after satisfying the production authentication boundary
 
 ### Requirement: OpenAPI HTTP contract
@@ -32,7 +32,7 @@ OpenAPI SHALL describe the MCP HTTP transport but SHALL NOT replace the authorit
 - AND the tool SHALL NOT be represented as a fake REST endpoint solely for Swagger visibility
 - AND OpenAPI requires an update only when the HTTP transport surface itself changes
 
-#### Scenario: `/anas` is described in OpenAPI
+#### Scenario: `/anas/mcp` is described in OpenAPI
 - WHEN the MCP endpoint is documented
 - THEN OpenAPI SHALL describe its route, method, authentication boundary, supported HTTP media types, and safe HTTP status behavior
 - AND the MCP protocol/installed SDK remains authoritative for the protocol-message envelope
@@ -46,16 +46,16 @@ The project SHALL validate `openapi.yaml` with an OpenAPI 3.2-capable validator 
 - AND validation failure SHALL block deployment
 
 ### Requirement: Concurrent dual-mode Cloudflare Access authentication
-Production `/anas` SHALL support Managed OAuth and Access Service Token authentication concurrently on the same protected resource.
+Production `/anas/mcp` SHALL support Managed OAuth and Access Service Token authentication concurrently on the same protected resource.
 
 #### Scenario: Both modes are enabled
-- GIVEN the production Access application protects `/anas`
+- GIVEN the production Access application protects `/anas/mcp`
 - WHEN an OAuth-capable user client or an approved Service Token client connects
 - THEN each client SHALL be able to authenticate using its own supported mode without disabling the other mode
 - AND both modes SHALL reach the same read-only MCP tool surface after successful Access authorization
 
 #### Scenario: Unauthenticated client connects
-- WHEN a client requests `/anas` without a valid Access authentication path
+- WHEN a client requests `/anas/mcp` without a valid Access authentication path
 - THEN Cloudflare Access SHALL reject or challenge the request
 - AND no MCP tool SHALL execute
 
@@ -65,7 +65,7 @@ OAuth-capable interactive MCP clients SHALL authenticate users through Cloudflar
 #### Scenario: ChatGPT connects
 - GIVEN the user matches an approved Access identity policy
 - WHEN ChatGPT follows Managed OAuth discovery and authorization-code + PKCE
-- THEN the authenticated request MAY reach `/anas`
+- THEN the authenticated request MAY reach `/anas/mcp`
 - AND the Worker SHALL receive an Access application assertion for the authenticated user
 
 #### Scenario: User is denied
@@ -74,7 +74,7 @@ OAuth-capable interactive MCP clients SHALL authenticate users through Cloudflar
 - THEN Access SHALL deny the request before MCP execution
 
 ### Requirement: Machine Service Token mode
-Headless agents and automated clients SHALL authenticate to the same `/anas` resource using Cloudflare Access Service Tokens.
+Headless agents and automated clients SHALL authenticate to the same `/anas/mcp` resource using Cloudflare Access Service Tokens.
 
 #### Scenario: Headless agent uses standard Service Token headers
 - GIVEN the token is authorized by a `Service Auth` policy
@@ -96,10 +96,10 @@ Service Token requests SHALL use Access `Service Auth` policy semantics and SHAL
 - THEN authentication/authorization SHALL fail before MCP execution
 
 ### Requirement: Access assertion validation
-The Worker SHALL validate `Cf-Access-Jwt-Assertion` for every authenticated request reaching `/anas`, regardless of whether authentication used Managed OAuth or Service Token.
+The Worker SHALL validate `Cf-Access-Jwt-Assertion` for every authenticated request reaching `/anas/mcp`, regardless of whether authentication used Managed OAuth or Service Token.
 
 #### Scenario: Authenticated request reaches the Worker
-- WHEN Access forwards a request to `/anas`
+- WHEN Access forwards a request to `/anas/mcp`
 - THEN the Worker SHALL verify JWT signature using the Access JWKS
 - AND SHALL verify the expected issuer/team domain, application audience, and token validity
 - AND SHALL reject a missing or invalid assertion before `createMcpHandler()`, tool execution, or Hyperdrive access
@@ -269,7 +269,7 @@ Credentials owned by platform integrations or other services SHALL remain with t
 
 
 #### Scenario: MCP clients authenticate
-- WHEN a client authenticates to `/anas` through Cloudflare Access with Managed OAuth or an Access Service Token
+- WHEN a client authenticates to `/anas/mcp` through Cloudflare Access with Managed OAuth or an Access Service Token
 - THEN the Worker validates the resulting `Cf-Access-Jwt-Assertion` (signature, issuer, application AUD, time validity) before MCP initialization
 - AND OAuth tokens, Service Token credentials, the assertion, and `Authorization` headers SHALL NOT be persisted, logged, or returned
 
@@ -299,7 +299,7 @@ Analytics tools SHALL enforce bounded request and response sizes.
 - THEN the service clamps or rejects the request with a clear validation error
 
 ### Requirement: Minimal health endpoint
-`/health` MAY remain unauthenticated while `/anas` requires a valid Cloudflare Access assertion, but it SHALL expose no sensitive state.
+`/health` MAY remain unauthenticated while `/anas/mcp` requires a valid Cloudflare Access assertion, but it SHALL expose no sensitive state.
 
 #### Scenario: Health check is requested
 - WHEN a caller requests `/health`
@@ -309,10 +309,10 @@ Analytics tools SHALL enforce bounded request and response sizes.
 ### Requirement: Clarity MCP tools
 The service SHALL expose read-only `clarity_overview`, `clarity_pages`, `clarity_acquisition`, and `clarity_page` MCP tools served from the canonical usable Clarity fetch run (`success`/`truncated` with rows), never summing rows across runs, windows, or breakdowns, flagging source truncation (`sourceTruncated`) separately from local response truncation (`responseTruncated`, bounded per-group/per-call detail reads with `nextOffset` continuation), and returning `data_unavailable` rather than zero metrics. Clarity tools SHALL only read projects in the non-secret `CLARITY_PROJECT_KEYS` allowlist and fail closed with `missing_configuration` otherwise. See `openspec/changes/add-clarity-analytics-tools/`.
 
-### Requirement: MCP is served only at the exact path `/anas`
+### Requirement: MCP is served only at the exact path `/anas/mcp`
 
-The Worker SHALL serve MCP only at `/anas` (org contract `mcp-service-hosting`). Any other path, including the retired `/mcp` and prefix collisions such as `/anas2`, SHALL return 404 without authentication, MCP, JWKS or database work. `GET /health` remains the only other route.
+The Worker SHALL serve MCP only at `/anas/mcp` (org contract `mcp-service-hosting`). Any other path, including the retired `/mcp` and bare `/anas`, and collisions such as `/anas/mcp/`, `/anas/mcp2`, `/anas2/mcp` and `/infra/mcp`, SHALL return 404 without authentication, MCP, JWKS or database work. `GET /health` remains the only other route.
 
 #### Scenario: Retired and colliding paths
-- WHEN a client requests `/mcp`, `/anas2`, `/anas/` or `/anas/x`
+- WHEN a client requests `/mcp`, `/anas`, `/anas/mcp/`, `/anas/mcp2`, `/anas2/mcp` or `/infra/mcp`
 - THEN the response is 404 and no tool, MCP session or database access occurs

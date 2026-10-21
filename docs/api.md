@@ -13,7 +13,7 @@ At the time this decision was recorded, Swagger UI 5.32+ supports OpenAPI 3.2.0.
 OpenAPI documents HTTP endpoints and transport behavior, including:
 
 - `GET /health`
-- `POST /anas`
+- `POST /anas/mcp`
 - HTTP status codes
 - content types
 - authentication boundary
@@ -56,13 +56,13 @@ Whether `/docs` is public or Access-protected must be an explicit decision. A pu
 
 ## Cloudflare Access representation
 
-Production `/anas` is protected by one Cloudflare Access application that concurrently accepts Mode A (Managed OAuth) and Mode B (Access Service Token). `openapi.yaml` lists both as alternative security requirements: `CloudflareAccessOAuth` (`type: oauth2`, `oauth2MetadataUrl` pointing at the Access team's RFC 8414 Authorization Server Metadata document, `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server`, which is the authorization server advertised by the resource's RFC 9728 protected-resource metadata at `https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/anas` — not a path on the MCP host — rather than a fixed `flows.authorizationCode` with hard-coded `authorizationUrl`/`tokenUrl`, since Cloudflare Access does not publish fixed ones for this flow) and `CloudflareAccessServiceTokenId` + `CloudflareAccessServiceTokenSecret` (headers `CF-Access-Client-Id` and `CF-Access-Client-Secret`, required together in the same security requirement, since Service Token auth needs both). OAuth discovery/authorization/token endpoints are owned by Cloudflare Access and are not implemented or enumerated by the Worker.
+Production `/anas/mcp` is protected by one Cloudflare Access application that concurrently accepts Mode A (Managed OAuth) and Mode B (Access Service Token). `openapi.yaml` lists both as alternative security requirements: `CloudflareAccessOAuth` (`type: oauth2`, `oauth2MetadataUrl` pointing at the Access team's RFC 8414 Authorization Server Metadata document, `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server`, which is the authorization server advertised by the resource's RFC 9728 protected-resource metadata at the URL advertised in the `resource_metadata` parameter of the `401` `WWW-Authenticate` challenge from `POST /anas/mcp` (discovered at runtime, not hardcoded; confirmed live at cutover) — not a path on the MCP host — rather than a fixed `flows.authorizationCode` with hard-coded `authorizationUrl`/`tokenUrl`, since Cloudflare Access does not publish fixed ones for this flow) and `CloudflareAccessServiceTokenId` + `CloudflareAccessServiceTokenSecret` (headers `CF-Access-Client-Id` and `CF-Access-Client-Secret`, required together in the same security requirement, since Service Token auth needs both). OAuth discovery/authorization/token endpoints are owned by Cloudflare Access and are not implemented or enumerated by the Worker.
 
 The contract documents the Worker-origin responses `401` (no valid `Cf-Access-Jwt-Assertion`), `403` (unexpected `Host` or any `Origin`; see `docs/mcp-authentication.md`) and `503` (Worker Access configuration missing; fails closed). Access's own challenges/denials happen at the edge and never reach the Worker. `/health` is outside the Access application (`security: []`). No example credential, token, assertion, or production AUD is embedded. See `docs/mcp-authentication.md`.
 
 ## MCP transport
 
-`/anas` is a protocol transport endpoint, not a conventional business REST operation.
+`/anas/mcp` is a protocol transport endpoint, not a conventional business REST operation.
 
 The OpenAPI contract intentionally keeps the MCP protocol-message schema open and points developers to the MCP protocol/SDK for the authoritative envelope.
 
@@ -86,7 +86,7 @@ Examples:
 - adding `/docs`
 - changing `/health` payload
 - adding a REST admin endpoint
-- changing `/anas` authentication semantics
+- changing `/anas/mcp` authentication semantics
 - adding a new HTTP webhook
 
 MCP tool-only changes do not require fake OpenAPI paths, but they still require MCP schema/tests and relevant OpenSpec updates.

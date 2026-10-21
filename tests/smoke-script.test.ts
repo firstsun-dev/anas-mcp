@@ -14,7 +14,7 @@ const hasTools = ["bash", "jq"].every((t) => spawnSync("sh", ["-c", `command -v 
 const ISSUER = "https://team.example.test";
 const BASE = "https://mcp.example.test";
 const HEALTH = JSON.stringify({ service: "anas-mcp", status: "ok" });
-const PRM = JSON.stringify({ resource: `${BASE}/anas`, authorization_servers: [ISSUER] });
+const PRM = JSON.stringify({ resource: `${BASE}/anas/mcp`, authorization_servers: [ISSUER] });
 const AS = JSON.stringify({ issuer: ISSUER, authorization_endpoint: `${ISSUER}/a`, token_endpoint: `${ISSUER}/t` });
 const NOT_FOUND = JSON.stringify({ error: "not_found" });
 const UNAUTH = JSON.stringify({ error: "invalid_token" });
@@ -26,17 +26,21 @@ const transport = (exit: number): Step => ({ exit, status: "000" }); // curl pri
 
 const healthy = (): Plan => ({
   "mcp.example.test/health": [ok("200", HEALTH)],
-  "mcp.example.test/anas": [ok("401", UNAUTH)],
+  "mcp.example.test/anas/mcp": [ok("401", UNAUTH)],
   "mcp.example.test/mcp": [ok("404", NOT_FOUND)],
-  "mcp.example.test/anas2": [ok("404", NOT_FOUND)],
-  "mcp.example.test/.well-known/cloudflare-access-protected-resource/anas": [ok("200", PRM)],
+  "mcp.example.test/anas": [ok("404", NOT_FOUND)],
+  "mcp.example.test/anas/mcp/": [ok("404", NOT_FOUND)],
+  "mcp.example.test/anas/mcp2": [ok("404", NOT_FOUND)],
+  "mcp.example.test/anas2/mcp": [ok("404", NOT_FOUND)],
+  "mcp.example.test/infra/mcp": [ok("404", NOT_FOUND)],
+  "mcp.example.test/.well-known/cloudflare-access-protected-resource/anas/mcp": [ok("200", PRM)],
   "team.example.test/.well-known/oauth-authorization-server": [ok("200", AS)],
 });
 
 const MOCK = `#!/usr/bin/env bash
-out=""; url=""; args=("$@")
+out=""; url=""; hdr=""; args=("$@")
 for ((i = 0; i < \${#args[@]}; i++)); do
-  case "\${args[$i]}" in -o) out="\${args[$((i + 1))]}";; https://*) url="\${args[$i]}";; esac
+  case "\${args[$i]}" in -o) out="\${args[$((i + 1))]}";; -D) hdr="\${args[$((i + 1))]}";; https://*) url="\${args[$i]}";; esac
 done
 key="\${url#https://}"; id="$(printf '%s' "$key" | tr -c 'A-Za-z0-9' _)"
 echo "$key" >> "$MOCK_DIR/calls.log"
@@ -45,6 +49,10 @@ total="$(wc -l < "$MOCK_DIR/$id.seq")"; idx=$((n < total ? n : total - 1)); echo
 line="$(sed -n "$((idx + 1))p" "$MOCK_DIR/$id.seq")"
 rc="\${line%%|*}"; rest="\${line#*|}"; status="\${rest%%|*}"; body="\${rest#*|}"
 [[ -n "$out" ]] && printf '%s' "$body" > "$out"
+# Access challenge: the canonical endpoint advertises its protected-resource metadata URL (unless a test removes it).
+if [[ -n "$hdr" && "$hdr" != /dev/null && "$status" == "401" && "$key" == */anas/mcp && ! -f "$MOCK_DIR/no_challenge" ]]; then
+  printf 'HTTP/2 401\r\nwww-authenticate: Bearer resource_metadata="https://mcp.example.test/.well-known/cloudflare-access-protected-resource/anas/mcp"\r\n\r\n' > "$hdr"
+fi
 printf '%s' "$status"
 exit "$rc"
 `;
@@ -129,19 +137,19 @@ describe.skipIf(!hasTools)("scripts/smoke-prod.sh (mock curl)", () => {
     expect(r.stdout + r.stderr).toContain("got HTTP 503");
   });
 
-  it("does not retry definitive 4xx answers (401 on /anas is the expected pass; 404 on health fails fast)", () => {
+  it("does not retry definitive 4xx answers (401 on /anas/mcp is the expected pass; 404 on health fails fast)", () => {
     const plan = healthy();
     plan["mcp.example.test/health"] = [ok("404")];
     const r = run(plan);
     expect(r.status).toBe(1);
     expect(r.calls("mcp.example.test/health")).toBe(1);
-    expect(r.calls("mcp.example.test/anas")).toBe(1);
+    expect(r.calls("mcp.example.test/anas/mcp")).toBe(1);
   });
 
-  it("fails when unauthenticated /anas is accepted (200) or leaks tools", () => {
+  it("fails when unauthenticated /anas/mcp is accepted (200) or leaks tools", () => {
     for (const step of [ok("200", JSON.stringify({ result: { tools: [] } })), ok("401", '{"tools":[]}')]) {
       const plan = healthy();
-      plan["mcp.example.test/anas"] = [step];
+      plan["mcp.example.test/anas/mcp"] = [step];
       expect(run(plan).status).toBe(1);
       rmSync(join(dir, "calls.log"), { force: true });
     }
@@ -149,8 +157,8 @@ describe.skipIf(!hasTools)("scripts/smoke-prod.sh (mock curl)", () => {
 
   it("fails when the authorization server or issuer does not match the configured Access issuer", () => {
     const wrongPrm = healthy();
-    wrongPrm["mcp.example.test/.well-known/cloudflare-access-protected-resource/anas"] = [
-      ok("200", JSON.stringify({ resource: `${BASE}/anas`, authorization_servers: ["https://evil.example.test"] })),
+    wrongPrm["mcp.example.test/.well-known/cloudflare-access-protected-resource/anas/mcp"] = [
+      ok("200", JSON.stringify({ resource: `${BASE}/anas/mcp`, authorization_servers: ["https://evil.example.test"] })),
     ];
     expect(run(wrongPrm).status).toBe(1);
     rmSync(join(dir, "calls.log"), { force: true });
@@ -159,7 +167,14 @@ describe.skipIf(!hasTools)("scripts/smoke-prod.sh (mock curl)", () => {
     expect(run(wrongAs).status).toBe(1);
   });
 
-  it.each(["mcp", "anas2"])("fails when /%s still serves MCP (2xx or tools) and passes on 401/403/404", (path) => {
+  it("fails when the 401 challenge advertises no protected-resource metadata (no hardcoded fallback)", () => {
+    writeFileSync(join(dir, "no_challenge"), "");
+    const r = run(healthy());
+    expect(r.status).toBe(1);
+    expect(r.calls("mcp.example.test/.well-known/cloudflare-access-protected-resource/anas/mcp")).toBe(0);
+  });
+
+  it.each(["mcp", "anas", "anas/mcp/", "anas/mcp2", "anas2/mcp", "infra/mcp"])("fails when /%s still serves MCP (2xx or tools) and passes on 401/403/404", (path) => {
     for (const step of [ok("200", JSON.stringify({ result: { tools: [] } })), ok("404", '{"tools":[]}'), ok("302")]) {
       const plan = healthy();
       plan[`mcp.example.test/${path}`] = [step];

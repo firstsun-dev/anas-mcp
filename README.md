@@ -9,7 +9,7 @@ Mode A: ChatGPT / OAuth client      Mode B: agent / CI / automation
         | Managed OAuth + PKCE                | CF-Access-Client-Id / -Secret
         +------------------+------------------+
                            v
-        Cloudflare Access (one application, https://mcp.firstsun.org/anas)
+        Cloudflare Access (one application, https://mcp.firstsun.org/anas/mcp)
                            | Cf-Access-Jwt-Assertion
                            v
 Cloudflare Worker: anas-mcp
@@ -25,7 +25,7 @@ createMcpHandler() --> read-only analytics tools
 ```
 
 - **HTTP API contract:** repository-root `openapi.yaml` uses OpenAPI 3.2.0 and is intended for Swagger-compatible tooling. It documents the HTTP surface; MCP tools remain MCP-native schemas rather than fake REST endpoints.
-- **MCP authentication:** production `/anas` is protected by one Cloudflare Access application that concurrently accepts **Mode A, Managed OAuth** (interactive clients such as ChatGPT) and **Mode B, Access Service Token** (headless agents). The Worker validates `Cf-Access-Jwt-Assertion` before any MCP/tool/database work. `/health` stays public and minimal. Cloudflare configuration is owned by `firstsun-dev/infra-config`.
+- **MCP authentication:** production `/anas/mcp` is protected by one Cloudflare Access application that concurrently accepts **Mode A, Managed OAuth** (interactive clients such as ChatGPT) and **Mode B, Access Service Token** (headless agents). The Worker validates `Cf-Access-Jwt-Assertion` before any MCP/tool/database work. `/health` stays public and minimal. Cloudflare configuration is owned by `firstsun-dev/infra-config`.
 - **Search Console:** direct Search Console API queries with the shared Google OAuth credential and the non-secret `GSC_ALLOWED_SITES` property allowlist. Tools: `gsc_list_sites`, `gsc_search_analytics` (see `docs/gsc.md`). Fail-closed if `GSC_ALLOWED_SITES` is missing or malformed; configured identifiers are not yet verified against the Google account.
 - **Clarity:** read normalized PostgreSQL data populated by `firstsun-dev/windmill-flows`; this service never calls the Clarity API directly. Tools: `clarity_overview`, `clarity_pages`, `clarity_acquisition`, `clarity_page` (see `docs/clarity.md`; needs the `CLARITY_PROJECT_KEYS` var). `health` lists `enabledSources` and `plannedSources`.
 - **GA4:** read through the Google Analytics Data API with the shared Google OAuth credential (Secrets Store binding `GOOGLE_OAUTH_CREDENTIALS`, secret `ANAS_PROD_GOOGLE_OAUTH_CREDENTIALS`) and the non-secret `GA4_PROPERTY_IDS` allowlist. Tools: `ga4_overview`, `ga4_pages` (`groupBy` `path` default / `fullUrl`), `ga4_acquisition`, `ga4_run_report` (see `docs/ga4.md`). Disabled and fail-closed until both are configured.
@@ -51,7 +51,7 @@ Current documented HTTP surface:
 
 ```text
 GET  /health
-POST /anas
+POST /anas/mcp
 ```
 
 Use Swagger-compatible OpenAPI 3.2 tooling to inspect/render the contract.
@@ -64,7 +64,7 @@ Automated OpenAPI validation is tracked in `openspec/changes/adopt-openapi-http-
 
 ## Authentication policy summary
 
-Production `/anas` accepts two authentication modes **at the same time** through one Cloudflare Access application: Mode A, Managed OAuth (authorization code + PKCE) for interactive clients, and Mode B, Access Service Token (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) for headless agents. This is not a toggle, fallback chain, or pair of endpoints.
+Production `/anas/mcp` accepts two authentication modes **at the same time** through one Cloudflare Access application: Mode A, Managed OAuth (authorization code + PKCE) for interactive clients, and Mode B, Access Service Token (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) for headless agents. This is not a toggle, fallback chain, or pair of endpoints.
 
 Cloudflare Access owns OAuth and Service Token evaluation. The Worker only verifies the resulting `Cf-Access-Jwt-Assertion` (signature, issuer, AUD, expiry) and fails closed with a generic `401` (or `503` if its non-secret Access config is missing). Service Tokens identify machines, not users. `CLOUDFLARE_API_TOKEN` and provider/database/CI credentials are never valid substitutes, credentials are never accepted via query string, and IP allowlisting or User-Agent checks are not authentication. `anas-mcp` must not add OAuth endpoints, KV, D1, Durable Objects, or PostgreSQL auth tables for MCP client authentication.
 
@@ -122,13 +122,13 @@ See `docs/cicd.md` and `openspec/changes/use-centralized-cf-worker-ci/`.
 
 The repository currently contains the MCP foundation and architecture specifications:
 
-- stateless `/anas` endpoint using Cloudflare Agents SDK
+- stateless `/anas/mcp` endpoint using Cloudflare Agents SDK
 - `/health` HTTP endpoint
 - MCP `health` tool
 - OpenAPI 3.2.0 HTTP contract
 - OpenSpec architecture, requirements, design, and implementation tasks
 - Secrets Store first credential policy
-- Cloudflare Access assertion validation for `/anas` (Worker validation + local tests implemented; Access application, Managed OAuth, Service Token, and production E2E pending `infra-config#59` rollout)
+- Cloudflare Access assertion validation for `/anas/mcp` (Worker validation + local tests implemented; Access application, Managed OAuth, Service Token, and production E2E pending `infra-config#59` rollout)
 - centralized `firstsun-dev/.github` Cloudflare Worker CI/CD decision
 
 Cloudflare Access rollout and E2E (ChatGPT OAuth, Service Token, concurrent use), datasource integrations, deployment caller, automated OpenAPI validation, and end-to-end ChatGPT authentication are not considered verified until actually tested.
@@ -158,7 +158,7 @@ Test MCP locally with:
 pnpm dlx @modelcontextprotocol/inspector@latest
 ```
 
-Locally, `/anas` requires an Access assertion that only Cloudflare Access can mint, so the test suite signs assertions with a generated key (see `docs/mcp-authentication.md`). Do not add an auth bypass for development. Production authentication must be verified against the deployed Worker through Access.
+Locally, `/anas/mcp` requires an Access assertion that only Cloudflare Access can mint, so the test suite signs assertions with a generated key (see `docs/mcp-authentication.md`). Do not add an auth bypass for development. Production authentication must be verified against the deployed Worker through Access.
 
 ## Verification
 

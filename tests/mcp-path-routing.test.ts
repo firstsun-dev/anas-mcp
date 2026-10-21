@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MCP_ROUTE, type Env } from "../src/index";
 import { TEST_AUD, TEST_ISSUER, accessEnv, handler, mcpCall, signAssertion, signingKey } from "./helpers";
 
-// Exact-path contract of https://mcp.firstsun.org/anas (openspec/changes/migrate-mcp-endpoint-to-anas). The hostname is
-// shared with future MCP services, so only the exact path `/anas` may reach the MCP handler; `/mcp` is retired.
+// Exact-path contract of https://mcp.firstsun.org/anas/mcp (openspec/changes/migrate-mcp-endpoint-to-anas). The hostname is
+// shared with future MCP services, so only the exact path `/anas/mcp` may reach the MCP handler; `/mcp` is retired.
 const pg = vi.hoisted(() => ({ constructed: 0 }));
 vi.mock("pg", () => ({
   Client: class {
@@ -42,11 +42,11 @@ function post(path: string, headers: Record<string, string> = {}, method = "POST
 }
 
 describe("canonical endpoint", () => {
-  it("is exactly /anas", () => {
-    expect(MCP_ROUTE).toBe("/anas");
+  it("is exactly /anas/mcp", () => {
+    expect(MCP_ROUTE).toBe("/anas/mcp");
   });
 
-  it("serves MCP initialization and tool discovery at /anas with a valid assertion", async () => {
+  it("serves MCP initialization and tool discovery at /anas/mcp with a valid assertion", async () => {
     const init = await mcpCall(env(), "initialize", {
       protocolVersion: "2025-03-26",
       capabilities: {},
@@ -68,14 +68,14 @@ describe("canonical endpoint", () => {
       .setAudience(TEST_AUD)
       .setExpirationTime(now + 300)
       .sign(signingKey.privateKey);
-    const res = await post("/anas", { "cf-access-jwt-assertion": serviceAssertion });
+    const res = await post("/anas/mcp", { "cf-access-jwt-assertion": serviceAssertion });
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("tools");
   });
 });
 
 describe("retired and non-canonical paths never reach MCP", () => {
-  const paths = ["/mcp", "/mcp/", "/anas2", "/anas-other", "/anas/", "/anas/mcp", "/anas/x", "/ANAS", "/infra", "/knowledge", "/", "//anas", "/anas%2F"];
+  const paths = ["/mcp", "/mcp/", "/anas", "/anas/", "/anas/mcp/", "/anas/mcp2", "/anas/mcp/x", "/anas2/mcp", "/anas-other/mcp", "/anas/MCP", "/ANAS/mcp", "/infra/mcp", "/knowledge/mcp", "/infra", "/", "//anas/mcp", "/anas/mcp%2F", "/anas%2Fmcp"];
 
   it.each(paths)("%s returns 404 for an authenticated request, with no MCP or database work", async (path) => {
     const res = await post(path, { "cf-access-jwt-assertion": await signAssertion() });
@@ -97,19 +97,19 @@ describe("retired and non-canonical paths never reach MCP", () => {
     expect(res.status).toBe(404);
   });
 
-  it("does not resolve a retired /mcp request that carries a query string to /anas", async () => {
-    const res = await post("/mcp?path=/anas", { "cf-access-jwt-assertion": await signAssertion() });
+  it("does not resolve a retired /mcp request that carries a query string to /anas/mcp", async () => {
+    const res = await post("/mcp?path=/anas/mcp", { "cf-access-jwt-assertion": await signAssertion() });
     expect(res.status).toBe(404);
   });
 });
 
-describe("/anas still fails closed before MCP", () => {
+describe("/anas/mcp still fails closed before MCP", () => {
   it.each([
     ["missing assertion", async () => ({}) as Record<string, string>],
     ["wrong audience", async () => ({ "cf-access-jwt-assertion": await signAssertion({ aud: "another-service-aud" }) })],
     ["wrong issuer", async () => ({ "cf-access-jwt-assertion": await signAssertion({ iss: "https://evil.cloudflareaccess.com" }) })],
   ])("%s -> 401 with no database access", async (_name, headers) => {
-    const res = await post("/anas", await headers());
+    const res = await post("/anas/mcp", await headers());
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
     expect(pg.constructed).toBe(0);
@@ -119,7 +119,7 @@ describe("/anas still fails closed before MCP", () => {
 describe("OAuth discovery is owned by Cloudflare Access, not the Worker", () => {
   // Access serves the protected-resource metadata at the edge, and the Worker never advertises its own. If a
   // request for these documents ever reaches the Worker, it must not answer with a fabricated document.
-  it.each(["/.well-known/cloudflare-access-protected-resource/anas", "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource"])(
+  it.each(["/.well-known/cloudflare-access-protected-resource/anas/mcp", "/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource"])(
     "%s is not served by the Worker",
     async (path) => {
       const res = await post(path, {}, "GET");

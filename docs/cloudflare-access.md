@@ -1,9 +1,9 @@
 # Cloudflare Access (active production authentication)
 
-Production `/anas` is protected by one Cloudflare Access application that concurrently accepts **Mode A, Managed OAuth** and **Mode B, Access Service Token**. See `docs/mcp-authentication.md` for Worker behavior and client setup, and `openspec/changes/support-dual-access-auth/` for the decision.
+Production `/anas/mcp` is protected by one Cloudflare Access application that concurrently accepts **Mode A, Managed OAuth** and **Mode B, Access Service Token**. See `docs/mcp-authentication.md` for Worker behavior and client setup, and `openspec/changes/support-dual-access-auth/` for the decision.
 
 
-> **OAuth discovery URLs.** Resource server `https://mcp.firstsun.org/anas`; protected-resource metadata (RFC 9728) `https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/anas`; authorization server `https://firstsun.cloudflareaccess.com`; its metadata (RFC 8414) `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server`. See `docs/mcp-authentication.md#discovery-chain-rfc-9728--rfc-8414`.
+> **OAuth discovery URLs.** Resource server `https://mcp.firstsun.org/anas/mcp`; protected-resource metadata (RFC 9728) the URL advertised in the `resource_metadata` parameter of the `401` `WWW-Authenticate` challenge from `POST /anas/mcp` (discovered at runtime, not hardcoded; confirmed live at cutover); authorization server `https://firstsun.cloudflareaccess.com`; its metadata (RFC 8414) `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server`. See `docs/mcp-authentication.md#discovery-chain-rfc-9728--rfc-8414`.
 
 ## Ownership
 
@@ -14,7 +14,7 @@ Production `/anas` is protected by one Cloudflare Access application that concur
 
 Do not provision or mutate Access resources from this repository, and do not hand-configure production state in the dashboard.
 
-> **Path migration `/mcp` -> `/anas`.** The sections below record the original API-key -> Access rollout and still say `/mcp` where they describe that history. The current endpoint is `/anas`; the coordinated cutover (Terraform Access path update first, then this Worker's deploy, with recovery rules) is `firstsun-dev/infra-config` `docs/mcp-anas-path-cutover.md`. Access application is updated in place (AUD unchanged), so `ACCESS_AUD` is not edited.
+> **Path migrations `/mcp` -> `/anas` -> `/anas/mcp`.** The sections below record the original API-key -> Access rollout and still say `/mcp` where they describe that history. The current endpoint is `/anas/mcp` (org OpenSpec `.github#60`); the coordinated cutover (Terraform Access path update first, then this Worker's deploy, with recovery rules) is `firstsun-dev/infra-config` `docs/mcp-anas-transport-suffix-cutover.md`. Access application is updated in place (AUD unchanged), so `ACCESS_AUD` is not edited.
 
 ## Ingress hardening: no alternative path around Access
 
@@ -29,8 +29,8 @@ Preview URLs documentation (2026-10).
 
 This is a guardrail on the Worker's own config, not a substitute for end-to-end verification. **Outstanding, not
 yet verified**: after the next deploy, confirm from a plain `curl` that the Worker's `*.workers.dev` hostname and
-any Version/Preview URL return no reachable `/anas` (disabled subdomains normally 404/not-found at the Cloudflare
-edge before reaching the Worker), and that the only way to reach `/anas` is through `https://mcp.firstsun.org/anas`
+any Version/Preview URL return no reachable `/anas/mcp` (disabled subdomains normally 404/not-found at the Cloudflare
+edge before reaching the Worker), and that the only way to reach `/anas/mcp` is through `https://mcp.firstsun.org/anas/mcp`
 once infra-config's Access application is applied. This repository cannot observe or assert live Cloudflare
 account/zone state; only the operator can confirm it after deploy.
 
@@ -171,10 +171,10 @@ Halt the window and choose forward fix, Worker rollback or full revert from the 
 Use operator-held credentials only and never record secrets:
 
 1. `GET https://mcp.firstsun.org/health` returns `{"service":"anas-mcp","status":"ok"}`.
-2. `POST /anas` with no credential is rejected (`401` or an Access challenge) and does not initialize MCP.
+2. `POST /anas/mcp` with no credential is rejected (`401` or an Access challenge) and does not initialize MCP.
 3. A client of the **restored** mode completes `initialize` and `tools/list`: API key for the previous Worker; Managed OAuth and a Service Token for the new Worker.
 4. A client of the mode no longer expected to work fails closed (never `200`).
-5. `*.workers.dev` and any Preview URL do not serve `/anas`.
+5. `*.workers.dev` and any Preview URL do not serve `/anas/mcp`.
 6. Logs show only fixed `access_rejected` reason codes and no credential material.
 
 None of this is verified until it has been run against the live system.
@@ -196,5 +196,5 @@ Also confirm OAuth still works while a Service Token is configured, and vice ver
 ## Smoke checks (no secrets in CI logs)
 
 - `GET https://mcp.firstsun.org/health` returns the minimal body.
-- `POST https://mcp.firstsun.org/anas` with no credentials is blocked/challenged by Access (it never reaches the Worker).
+- `POST https://mcp.firstsun.org/anas/mcp` with no credentials is blocked/challenged by Access (it never reaches the Worker).
 - Service Token checks use operator-held credentials; never place the Client Secret in repository files or CI logs.

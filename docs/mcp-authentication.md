@@ -6,7 +6,7 @@ Decision: `openspec/changes/support-dual-access-auth/`. This supersedes the Work
 Mode A  ChatGPT / OAuth-capable client --Managed OAuth (auth code + PKCE)--+
 Mode B  Agent / CI / automation --CF-Access-Client-Id + -Secret------------+
                                                                           v
-                                          Cloudflare Access (one application, https://mcp.firstsun.org/anas)
+                                          Cloudflare Access (one application, https://mcp.firstsun.org/anas/mcp)
                                                                           | Cf-Access-Jwt-Assertion
                                                                           v
                                           Worker anas-mcp: verify assertion (src/auth/cloudflare-access.ts)
@@ -14,7 +14,7 @@ Mode B  Agent / CI / automation --CF-Access-Client-Id + -Secret------------+
                                           createMcpHandler() -> read-only tools
 ```
 
-Mode A and Mode B are enabled **at the same time** on the same Access application and the same `/anas` URL. This is not a feature flag, a fallback chain, or two endpoints. Cloudflare Access looks at each request's credentials and applies the matching policy:
+Mode A and Mode B are enabled **at the same time** on the same Access application and the same `/anas/mcp` URL. This is not a feature flag, a fallback chain, or two endpoints. Cloudflare Access looks at each request's credentials and applies the matching policy:
 
 | Mode | Client | Credential | Access policy |
 | --- | --- | --- | --- |
@@ -25,7 +25,7 @@ Cloudflare configuration (custom domain, Access application, Managed OAuth, poli
 
 ## Endpoint path and routing
 
-The only MCP endpoint is `https://mcp.firstsun.org/anas` (exact path; `/mcp` was retired with no alias or redirect, per org OpenSpec `mcp-service-hosting`, `.github#59`). The Worker answers `404 {"error":"not_found"}` for every other path (`/mcp`, `/anas2`, `/anas/`, sub-paths, case variants) before authentication, JWKS fetch, MCP initialization or database access; `GET /health` is the only other route. `hostname` and path are shared with future MCP services, each with its own Worker and Access AUD; this Worker never accepts another service's AUD. Cloudflare Access serves OAuth discovery (the Worker returns 404 for `/.well-known/*`). Verified by `tests/mcp-path-routing.test.ts`; live Managed OAuth/PKCE and Service Token behaviour at `/anas` is verified only during the production cutover (`infra-config/docs/mcp-anas-path-cutover.md`).
+The only MCP endpoint is `https://mcp.firstsun.org/anas/mcp` (exact path; `/mcp` was retired with no alias or redirect, per org OpenSpec `mcp-service-hosting`, `.github#59`). The Worker answers `404 {"error":"not_found"}` for every other path (`/mcp`, `/anas`, `/anas/mcp/`, `/anas/mcp2`, `/anas2/mcp`, `/infra/mcp`, sub-paths, case variants) before authentication, JWKS fetch, MCP initialization or database access; `GET /health` is the only other route. `hostname` and path are shared with future MCP services, each with its own Worker and Access AUD; this Worker never accepts another service's AUD. Cloudflare Access serves OAuth discovery (the Worker returns 404 for `/.well-known/*`). Verified by `tests/mcp-path-routing.test.ts`; live Managed OAuth/PKCE and Service Token behaviour at `/anas/mcp` is verified only during the production cutover (`infra-config/docs/mcp-anas-transport-suffix-cutover.md`).
 
 ## Worker behavior
 
@@ -36,7 +36,7 @@ The only MCP endpoint is `https://mcp.firstsun.org/anas` (exact path; `/mcp` was
 - Authenticated but wrong `Host` (anything other than `mcp.firstsun.org`, plus localhost names for `wrangler dev`/tests) or any present `Origin` header: `403` JSON-RPC error from the Agents SDK (`agents@0.22`, `allowedHostnames` / `allowedOriginHostnames: []`), before MCP or database work. Authentication is evaluated first, so unauthenticated callers always see the generic `401`. Server-to-server clients (ChatGPT, Service Token agents) send no `Origin` and are unaffected; browser-based clients are intentionally unsupported. No wildcard Host/Origin is configured. An authenticated `OPTIONS` with a disallowed Origin gets the SDK's `403`; an unauthenticated `OPTIONS` gets the Worker's generic `401` first; an authenticated `OPTIONS` without Origin gets an empty `200` and does no MCP or database work. The SDK's default `Access-Control-Allow-Origin: *` header is still emitted (including on its `403`s); it grants no credentials and no browser can use it because Origin validation and Access reject first, so it was deliberately left unchanged (disabling it is untested against real clients, and ChatGPT's behavior is unverified). Verified by `tests/mcp-host-origin.test.ts` against the real SDK, not against live production.
 - Missing or invalid Worker configuration (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`), **or** the Access JWKS itself could not be fetched or used (network error, timeout, non-200, bad JSON, or a structurally malformed key document): `503 {"error":"auth_unavailable"}`. The Worker fails closed rather than treating "I could not check" as "denied" or, worse, "allowed". A JWKS that fetches successfully and is well-formed but does not contain the token's key id is still a `401` (the service is available and usable; this particular token is not valid), not a `503`.
 - Rejections log only `{"event":"access_rejected","reason":"<fixed code>"}` (for example `missing_assertion`, `ERR_JWT_EXPIRED`). Assertions, tokens, headers, claims, and the AUD are never logged or returned.
-- `GET /health` is public and returns only `{"service":"anas-mcp","status":"ok"}`. Access protects `/anas` only.
+- `GET /health` is public and returns only `{"service":"anas-mcp","status":"ok"}`. Access protects `/anas/mcp` only.
 
 ## Worker configuration (non-secret)
 
@@ -47,24 +47,24 @@ The only MCP endpoint is `https://mcp.firstsun.org/anas` (exact path; `/mcp` was
 | `ACCESS_TEAM_DOMAIN` | `<team>.cloudflareaccess.com` (infra-config output `anas_mcp_access_team_domain`) |
 | `ACCESS_AUD` | Access application AUD tag (infra-config output `anas_mcp_access_aud`) |
 
-Both are identifiers, not credentials. They are empty in source until the Access application exists; deploying a Worker with empty values makes `/anas` return `503`. Fill them as part of the coordinated rollout (see `docs/cloudflare-access.md`). No Secrets Store binding or Worker secret is used for authentication.
+Both are identifiers, not credentials. They are empty in source until the Access application exists; deploying a Worker with empty values makes `/anas/mcp` return `503`. Fill them as part of the coordinated rollout (see `docs/cloudflare-access.md`). No Secrets Store binding or Worker secret is used for authentication.
 
 ## Client setup
 
 ### Mode A: Managed OAuth
 
-Point the client at `https://mcp.firstsun.org/anas`. OAuth discovery, dynamic client registration, authorization, and tokens are served by Cloudflare Access; the user logs in with the approved identity provider. The Worker implements no OAuth endpoints and stores no OAuth state.
+Point the client at `https://mcp.firstsun.org/anas/mcp`. OAuth discovery, dynamic client registration, authorization, and tokens are served by Cloudflare Access; the user logs in with the approved identity provider. The Worker implements no OAuth endpoints and stores no OAuth state.
 
 #### Discovery chain (RFC 9728 → RFC 8414)
 
 | Role | URL |
 |---|---|
-| MCP Resource Server | `https://mcp.firstsun.org/anas` |
-| OAuth Protected Resource Metadata (RFC 9728) | `https://mcp.firstsun.org/.well-known/cloudflare-access-protected-resource/anas` |
+| MCP Resource Server | `https://mcp.firstsun.org/anas/mcp` |
+| OAuth Protected Resource Metadata (RFC 9728) | the URL advertised in the `resource_metadata` parameter of the `401` `WWW-Authenticate` challenge from `POST /anas/mcp` (discovered at runtime, not hardcoded; confirmed live at cutover) |
 | OAuth Authorization Server | `https://firstsun.cloudflareaccess.com` |
 | OAuth Authorization Server Metadata (RFC 8414) | `https://firstsun.cloudflareaccess.com/.well-known/oauth-authorization-server` |
 
-1. The client sends an unauthenticated `POST /anas`; Access answers `401` with `WWW-Authenticate: Bearer ... resource_metadata="<protected-resource metadata URL>"`.
+1. The client sends an unauthenticated `POST /anas/mcp`; Access answers `401` with `WWW-Authenticate: Bearer ... resource_metadata="<protected-resource metadata URL>"`.
 2. The client fetches the protected-resource metadata, which names `authorization_servers: ["https://firstsun.cloudflareaccess.com"]`.
 3. The client fetches that server's RFC 8414 metadata and reads `authorization_endpoint`, `token_endpoint`, `registration_endpoint` and `code_challenge_methods_supported` (`S256`), then registers, authorizes (PKCE) and obtains a token.
 
@@ -87,10 +87,10 @@ Single-header agents are only supported if a target client actually needs it (Ac
 
 ## Local development
 
-Production `/anas` requires an Access assertion, which only Cloudflare Access can mint. For local work:
+Production `/anas/mcp` requires an Access assertion, which only Cloudflare Access can mint. For local work:
 
 - the test suite signs assertions with a locally generated RSA key and injects a local JWKS (`tests/helpers.ts`); no real credentials are involved;
-- `wrangler dev` has no Access in front of it. To exercise `/anas` by hand you must supply your own test assertion signed by a key you also serve as JWKS, which is what the tests do. Do not weaken the Worker or add an auth bypass for development.
+- `wrangler dev` has no Access in front of it. To exercise `/anas/mcp` by hand you must supply your own test assertion signed by a key you also serve as JWKS, which is what the tests do. Do not weaken the Worker or add an auth bypass for development.
 
 ## Not substitutes
 
