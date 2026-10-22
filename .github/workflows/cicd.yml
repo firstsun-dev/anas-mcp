@@ -1,51 +1,47 @@
 name: CI/CD
 
-# Production deployment. Thin caller of the organization-managed reusable pipeline; it contains no Wrangler,
-# version-upload, deploy or rollback logic (see docs/cicd.md). Triggers on push to `main` ONLY: feature branches
-# and pull requests are verification-only (pr-verify.yml) and never reach the deploy-capable template.
+# Thin caller of the organization-managed Cloudflare Worker pipeline v2 (see docs/cicd.md). It contains no Wrangler,
+# version-upload, deploy or rollback logic. Strategy is `production-only`: every branch push / same-repo PR runs
+# verification only; ONLY a push to `main` deploys Production. No Native Preview, no Shared Dev, no persistent Dev.
+#
+# Deliberately NOT triggered by `workflow_dispatch` (it would deploy Production from main) or `delete` (the
+# lifecycle job is skipped for production-only).
 
 on:
-  push:
-    branches: [main]
+  push: # all branches: verification-only except main
+  pull_request:
 
 permissions:
   contents: read
-  checks: write # requested by the reusable workflow's test reporter
-
-# One production deployment at a time; a newer push waits instead of cancelling an in-flight deploy.
-concurrency:
-  group: anas-mcp-production-deploy
-  cancel-in-progress: false
+  deployments: write # requested by the reusable workflow's Deploy job (Production deployment ledger)
+  pull-requests: write # requested by the reusable workflow's Deploy job
 
 jobs:
-  pipeline:
-    uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1.5.0
-    # The template declares no explicit `secrets:`; it only reads CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID.
-    secrets: inherit
+  cf:
+    # uses and tools_ref MUST be the same ref (verified commit of firstsun-dev/.github; see docs/cicd.md).
+    uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@3cf1d52891f04cde737af10ea303f9b7d6b2e6ef
     with:
+      tools_ref: 3cf1d52891f04cde737af10ea303f9b7d6b2e6ef
       app_name: anas-mcp
       app_path: .
       app_version: ${{ github.sha }}
+      deployment_strategy: production-only
+      preview_on_branch_push: false
+      shared_dev_on_branch_push: false
+      wrangler_config: wrangler.jsonc
+      # Aggregate gate (typecheck, Vitest, OpenAPI lint), unchanged from the previous pipeline.
       test_unit_cmd: pnpm run check
+      # Wrangler bundles the Worker in `versions upload`; this is a credential-free build-validation gate only.
       build_cmd: pnpm exec wrangler deploy --dry-run
       app_url_prod: https://mcp.firstsun.org
-      # verify_cmd is intentionally unset: the template's verify path installs Playwright and reverts to the
-      # previous Worker version on failure, which could restore a version without Cloudflare Access.
-
-  # Read-only, credential-free smoke checks. Failure fails the run; there is NO automatic rollback.
-  smoke:
-    name: Production smoke (no auto-rollback)
-    needs: pipeline
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - name: Smoke test production
-        run: scripts/smoke-prod.sh
-        env:
-          BASE_URL: https://mcp.firstsun.org
-          EXPECTED_ISSUER: https://firstsun.cloudflareaccess.com
+      # GitHub-hosted: this repository is public, so fork-PR code must not run on the org's self-hosted runners.
+      runner: ubuntu-latest
+      # Never auto-revert: a previous Worker version may predate Cloudflare Access authentication.
+      production_rollback_policy: manual
+      smoke_cmd: scripts/smoke-prod.sh
+      smoke_env: |
+        BASE_URL=https://mcp.firstsun.org
+        EXPECTED_ISSUER=https://firstsun.cloudflareaccess.com
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
