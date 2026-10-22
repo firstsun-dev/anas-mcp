@@ -146,7 +146,7 @@ describe("repository guardrails", () => {
     it("is a single thin job without caller-level concurrency (the callee owns the cfv2- groups)", () => {
       expect(Object.keys(wf.jobs)).toEqual(["cf"]);
       expect(wf.concurrency).toBeUndefined();
-      expect(wf.permissions).toEqual({ contents: "read", deployments: "write", "pull-requests": "write" });
+      expect(wf.permissions).toEqual({ contents: "write", deployments: "write", "pull-requests": "write" });
     });
     it("duplicates no deployment logic: no wrangler upload/deploy/rollback/secret commands in the caller or smoke script", () => {
       const smoke = read("scripts/smoke-prod.sh").replace(/^\s*#.*$/gm, "");

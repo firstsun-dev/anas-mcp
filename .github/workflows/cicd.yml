@@ -12,7 +12,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write # ceiling required by the callee's (here skipped, release_cmd unset) Release job; the Deploy job itself is contents: read
   deployments: write # requested by the reusable workflow's Deploy job (Production deployment ledger)
   pull-requests: write # requested by the reusable workflow's Deploy job
 
