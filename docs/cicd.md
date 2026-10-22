@@ -9,7 +9,7 @@ The application repository may contain a thin caller workflow that defines trigg
 Canonical reusable workflow:
 
 ```yaml
-uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@3cf1d52891f04cde737af10ea303f9b7d6b2e6ef
+uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@026f5b40e9a6570005a8b30c2ae48338bb71337f
 ```
 
 The caller pins a full commit SHA, and `tools_ref` MUST be the same SHA (the engine checks out its tooling at `tools_ref`). Do not point production deployment at a branch or a floating tag.
@@ -48,7 +48,7 @@ The caller workflow must remain thin.
 
 ## Production caller (`.github/workflows/cicd.yml`)
 
-Migrated from `_cf-worker-template.yml@v1.5.0` to `_cf-worker-v2.yml` at `firstsun-dev/.github` commit `3cf1d52891f04cde737af10ea303f9b7d6b2e6ef` (main HEAD when verified, 2026-10-22; `docs/cf-worker-v2.md` read at that commit). The shared repository is consumed unmodified. Tracking issue: firstsun-dev/anas-mcp#32.
+Migrated from `_cf-worker-template.yml@v1.5.0` to `_cf-worker-v2.yml` at `firstsun-dev/.github` commit `026f5b40e9a6570005a8b30c2ae48338bb71337f` (main HEAD when re-verified, 2026-10-22; includes the 0e01649 Deploy tooling-install fix; `docs/cf-worker-v2.md` read at that commit). The shared repository is consumed unmodified. Tracking issue: firstsun-dev/anas-mcp#32.
 
 - **Strategy: `production-only`.** `preview_on_branch_push: false`, `shared_dev_on_branch_push: false`; no Native Preview, no Shared Dev, no persistent Dev, no Preview/Dev credentials. A non-`main` push runs verification only (Lint/Typecheck/Unit/Build Validation jobs of the shared workflow); only a push to `main` reaches the Deploy job. `workers_dev: false` / `preview_urls: false` stay in `wrangler.jsonc` (guardrail test).
 - **Triggers: `push` only.** `workflow_dispatch` is omitted because on `main` it would be a manual Production deploy path; `delete` is omitted because the lifecycle job is skipped for `production-only`; `pull_request` is omitted because the shared CI action requires the org's self-hosted runner (it needs a pre-installed pnpm: a trial on `ubuntu-latest` failed with `pnpm: command not found`) and this repository is public, so a fork PR must never reach that runner. Same-repo PRs are verified by their branch push. The shared documentation says callers "MUST" also trigger on `pull_request`/`delete`/`workflow_dispatch`; that is deliberately not followed for the reasons above.

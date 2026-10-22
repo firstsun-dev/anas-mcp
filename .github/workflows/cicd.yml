@@ -20,9 +20,9 @@ permissions:
 jobs:
   cf:
     # uses and tools_ref MUST be the same ref (verified commit of firstsun-dev/.github; see docs/cicd.md).
-    uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@3cf1d52891f04cde737af10ea303f9b7d6b2e6ef
+    uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@026f5b40e9a6570005a8b30c2ae48338bb71337f
     with:
-      tools_ref: 3cf1d52891f04cde737af10ea303f9b7d6b2e6ef
+      tools_ref: 026f5b40e9a6570005a8b30c2ae48338bb71337f
       app_name: anas-mcp
       app_path: .
       app_version: ${{ github.sha }}
