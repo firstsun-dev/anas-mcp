@@ -9,10 +9,10 @@ The application repository may contain a thin caller workflow that defines trigg
 Canonical reusable workflow:
 
 ```yaml
-uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1.5.0
+uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@3cf1d52891f04cde737af10ea303f9b7d6b2e6ef
 ```
 
-The caller pins a release tag (or an approved commit SHA). Do not point production deployment at a branch or the floating `@v1`.
+The caller pins a full commit SHA, and `tools_ref` MUST be the same SHA (the engine checks out its tooling at `tools_ref`). Do not point production deployment at a branch or a floating tag.
 
 ## Ownership
 
@@ -48,35 +48,20 @@ The caller workflow must remain thin.
 
 ## Production caller (`.github/workflows/cicd.yml`)
 
-Verified against `_cf-worker-template.yml@v1.5.0` (tag commit `cd1cdc0ab29d5069bc31b5faef55d271e62dac36`); the shared repository is consumed unmodified.
+Migrated from `_cf-worker-template.yml@v1.5.0` to `_cf-worker-v2.yml` at `firstsun-dev/.github` commit `3cf1d52891f04cde737af10ea303f9b7d6b2e6ef` (main HEAD when verified, 2026-10-22; `docs/cf-worker-v2.md` read at that commit). The shared repository is consumed unmodified. Tracking issue: firstsun-dev/anas-mcp#32.
 
-```yaml
-on:
-  push:
-    branches: [main]
-concurrency:
-  group: anas-mcp-production-deploy
-  cancel-in-progress: false
-jobs:
-  pipeline:
-    uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1.5.0
-    secrets: inherit
-    with:
-      app_name: anas-mcp
-      app_path: .
-      app_version: ${{ github.sha }}
-      test_unit_cmd: pnpm run check
-      build_cmd: pnpm exec wrangler deploy --dry-run
-      app_url_prod: https://mcp.firstsun.org
-  smoke: # read-only, see below
-```
+- **Strategy: `production-only`.** `preview_on_branch_push: false`, `shared_dev_on_branch_push: false`; no Native Preview, no Shared Dev, no persistent Dev, no Preview/Dev credentials. A non-`main` push runs verification only (Lint/Typecheck/Unit/Build Validation jobs of the shared workflow); only a push to `main` reaches the Deploy job. `workers_dev: false` / `preview_urls: false` stay in `wrangler.jsonc` (guardrail test).
+- **Triggers: `push` only.** `workflow_dispatch` is omitted because on `main` it would be a manual Production deploy path; `delete` is omitted because the lifecycle job is skipped for `production-only`; `pull_request` is omitted because the shared CI action requires the org's self-hosted runner (it needs a pre-installed pnpm: a trial on `ubuntu-latest` failed with `pnpm: command not found`) and this repository is public, so a fork PR must never reach that runner. Same-repo PRs are verified by their branch push. The shared documentation says callers "MUST" also trigger on `pull_request`/`delete`/`workflow_dispatch`; that is deliberately not followed for the reasons above.
+- **Permissions.** `contents: write` is only the ceiling GitHub demands because the callee declares it on its (here skipped, `release_cmd` unset) Release job; without it the run fails at startup. `deployments: write` and `pull-requests: write` are used by Deploy.
+- **Inputs.** `wrangler_config: wrangler.jsonc` (the shared default is `wrangler.toml`). `test_unit_cmd: pnpm run check` is the aggregate gate (typecheck, Vitest, `redocly lint`); `build_cmd: pnpm exec wrangler deploy --dry-run` is a credential-free build validation (the Worker is bundled by `wrangler versions upload`). `app_version` is the commit SHA. `production_rollback_policy: manual` (never an automatic revert, see below). `smoke_cmd: scripts/smoke-prod.sh` with `smoke_env` `BASE_URL`/`EXPECTED_ISSUER`.
+- **Credentials.** Only `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are passed explicitly (no `secrets: inherit`); they are only reachable by the main-branch Deploy job. Smoke receives no secret.
+- **Serialization.** The shared workflow owns the run-level `cfv2-prod-anas-mcp` concurrency group (`queue: max`, FIFO); the caller declares none (a caller group using the `cfv2-` prefix would deadlock).
+- **Engine behaviour that replaces the v1 template:** `wrangler versions upload` + `versions deploy @100` on the audited config; the `--var COMMIT_HASH/VERSION` behaviour described below is unchanged.
+- **Contract check.** Every `with:`/`secrets:` key of the caller is declared by the pinned workflow; `tests/repo-guardrails.test.ts` enforces the key set, the SHA/`tools_ref` match and the production-only settings. To bump the SHA, re-read `_cf-worker-v2.yml` and `docs/cf-worker-v2.md` at the new commit and update both refs together.
 
-- **Main only.** The only trigger is `push` to `main`. There is no `pull_request`, `workflow_dispatch`, or other-branch trigger, so the template's `--env dev` branch path (this repository defines no `env.dev`) can never run, and PR code never reaches the deploy-capable pipeline or the org's self-hosted runners. `enable_preview_alias`, `app_url_dev`, and `worker_name_dev` are unset.
-- **Pinned.** `@v1.5.0` is a release tag, not a branch or floating `@v1`. `tests/repo-guardrails.test.ts` rejects `@main`/`@v1` and any input the template does not declare. Pinning to the commit SHA is stricter (tags are mutable) and is allowed by the test.
-- **Inputs.** `app_version` is the commit SHA (the template runs `pnpm -r version` on it with `|| true`; verified locally that with this `pnpm-workspace.yaml` it matches no projects and exits 0, so `package.json` is not rewritten). `test_unit_cmd` runs the aggregate check (typecheck, Vitest, `redocly lint`) before any migrate/deploy job. `build_cmd` is the template's only build hook; the Worker is bundled by `wrangler versions upload`, so a dry-run build is a no-op safety gate. `verify_cmd` is deliberately unset (see Smoke tests).
-- **Runner.** The template default (`linux`, the org's trusted self-hosted runners) is used. Only merged `main` code runs there.
-- **Serialization.** The template defines no `concurrency`. The caller does: one production deployment at a time, `cancel-in-progress: false` so a running deploy is never cancelled; GitHub keeps at most one pending run, so a newer push supersedes an older queued one (latest `main` wins).
-- **Credentials.** The template declares no `secrets:` block, so `secrets: inherit` is required. It reads only `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (organization secrets). Smoke and PR jobs receive no secrets.
+### Known gap: the shared smoke probe requests `<app_url_prod>/` and requires a 2xx
+
+The v2 Deploy job always runs the engine's built-in probe before `smoke_cmd`: it GETs `<app_url_prod>/` and accepts only 2xx (or an Access login redirect, which `access_protected_targets` accepts for `preview` by default, not `prod`). `https://mcp.firstsun.org/` currently returns **404** (the Worker serves only `/health` and `/anas/mcp`), and there is no input to change the probe path. A Production deploy from this caller therefore publishes the new version and then reports the run failed at the smoke step (rollback is manual, so the version stays live). This must be resolved before merging (either the Worker answers `GET /` with 2xx, or the shared engine gains a probe-path input); it is deliberately not worked around here by loosening the shared engine or adding unreviewed Worker surface.
 
 ### Effective production configuration (verified non-deploying)
 
@@ -96,11 +81,11 @@ env.VERSION ("(hidden)")           Environment Variable
 
 ## Endpoint-path migration ordering
 
-A push to `main` deploys production immediately. The `/anas` -> `/anas/mcp` change must not be merged until `infra-config` has applied the Access path update (see `infra-config/docs/mcp-anas-transport-suffix-cutover.md`); otherwise the `smoke` job fails on the missing `/anas/mcp` Access challenge and protected-resource metadata (the Worker itself stays fail-closed). The smoke job also asserts `/mcp`, `/anas` and `/anas/mcp2` serve nothing.
+A push to `main` deploys production immediately. The `/anas` -> `/anas/mcp` change must not be merged until `infra-config` has applied the Access path update (see `infra-config/docs/mcp-anas-transport-suffix-cutover.md`); otherwise the smoke step fails on the missing `/anas/mcp` Access challenge and protected-resource metadata (the Worker itself stays fail-closed). The smoke job also asserts `/mcp`, `/anas` and `/anas/mcp2` serve nothing.
 
 ## Smoke tests and rollback
 
-The template's `verify_cmd` path installs Playwright and, on failure, runs `wrangler versions deploy <previous>@100`. For this service that is unsafe: the previous version may predate Cloudflare Access authentication, so an automatic revert could reopen `/anas/mcp` with a weaker gate. `verify_cmd` is therefore unset and the caller adds an application-specific `smoke` job (`scripts/smoke-prod.sh`; GitHub-hosted, no secrets, `contents: read`) that runs after a successful `pipeline` and checks, with unauthenticated requests only:
+An automatic revert is unsafe for this service: the previous version may predate Cloudflare Access authentication, so it could reopen `/anas/mcp` with a weaker gate. The caller therefore sets `production_rollback_policy: manual` and runs `scripts/smoke-prod.sh` as the shared Deploy job's `smoke_cmd` (no secrets), after the engine's built-in probe (see Known gap), checking with unauthenticated requests only:
 
 1. `GET /health` is `200` with `{service: "anas-mcp", status: "ok"}`.
 2. `POST /anas/mcp` without credentials is `401`/`403` and returns no `tools`; `POST /mcp`, `POST /anas` and `POST /anas/mcp2` are `401`/`403`/`404` and return no `tools`.
@@ -113,7 +98,7 @@ Transport errors (DNS, connect, timeout) and HTTP `5xx` are retried up to 6 requ
 
 ## Pull request verification gate
 
-`.github/workflows/pr-verify.yml` runs on `pull_request` only: `pnpm install --frozen-lockfile`, `pnpm run check` (TypeScript, Vitest including security/regression tests, `redocly lint openapi.yaml` for OpenAPI 3.2) and `pnpm exec wrangler deploy --dry-run`. It cannot deploy: no push/dispatch trigger, `permissions: contents: read`, no secrets, no Cloudflare credentials, no call to the shared template, GitHub-hosted runner (this repository is public; PR code must not run on self-hosted runners). `tests/repo-guardrails.test.ts` fails if any of that changes. To make a failing check block merging, require the `PR Verify / Verify (…)` check in branch protection for `main` (a repository setting; not configured by this repository).
+`pr-verify.yml` was removed: the shared workflow's CI jobs (`pnpm run check`, `wrangler deploy --dry-run`) run on every branch push, which covers same-repo PRs, so it duplicated them. The trade-off is that fork PRs are no longer verified (they would otherwise run on the self-hosted runners of a public repository). To make a failing check block merging, require the shared workflow's `cf / Unit Tests` and `cf / Build Validation` checks in branch protection for `main` (repository setting; not configured by this repository).
 
 ## Package manager
 
@@ -121,7 +106,7 @@ The repository uses **pnpm** (`packageManager: pnpm@10.33.0`, matching `blog`, `
 
 ## Production release gates (status as of 2026-10-15)
 
-**Merging this PR is the first production deployment.** Because `cicd.yml` deploys every push to `main`, `main` must be gated before activation. This repository does not change GitHub or Cloudflare settings; the items below are operator actions.
+**A push to `main` deploys Production (merging the v2 migration PR triggers one).** Because `cicd.yml` deploys every push to `main`, `main` must be gated before activation. This repository does not change GitHub or Cloudflare settings; the items below are operator actions.
 
 ### Verified (read-only GitHub API, 2026-10-15)
 
@@ -186,7 +171,7 @@ Use least privilege. Do not copy runtime Google OAuth credentials, MCP authentic
 
 ## Branch behavior
 
-The central template treats pull requests as test-only, `main` pushes as production deployment, and every other branch push as `--env dev`. `anas-mcp` defines no `env.dev`, so the caller must never run the template for non-`main` events; it triggers on `main` only. Re-check the template before bumping `@v1.5.0`.
+With `deployment_strategy: production-only`, `preview_on_branch_push: false` and `shared_dev_on_branch_push: false`, the v2 workflow deploys nothing from a non-`main` ref: its Deploy condition requires `refs/heads/main` for production-only, and Shared Dev / Preview / persistent Dev are all disabled. Re-check the shared workflow before bumping the pinned SHA.
 
 ## Change policy
 

@@ -32,7 +32,7 @@ createMcpHandler() --> read-only analytics tools
 - **Credentials:** Secrets Store first. Any long-lived secret consumed directly by this Worker should come from Cloudflare Secrets Store whenever supported.
 - **Google OAuth:** one JSON credential stored in Cloudflare Secrets Store.
 - **Database:** read-only PostgreSQL access through Cloudflare Hyperdrive; the database password remains managed by Hyperdrive and is not duplicated into Worker secrets.
-- **CI/CD:** Cloudflare Worker deployment is implemented centrally in `firstsun-dev/.github`; this repository must use a thin caller for the shared `_cf-worker-template.yml` workflow rather than duplicating deploy steps.
+- **CI/CD:** Cloudflare Worker deployment is implemented centrally in `firstsun-dev/.github`; this repository must use a thin caller for the shared `_cf-worker-v2.yml` workflow (production-only) rather than duplicating deploy steps.
 
 See:
 
@@ -95,28 +95,16 @@ Intentional exceptions:
 The deployment implementation belongs to:
 
 ```text
-firstsun-dev/.github/.github/workflows/_cf-worker-template.yml
+firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml
 ```
 
-`anas-mcp` may add a thin caller workflow similar to:
-
-```yaml
-jobs:
-  pipeline:
-    uses: firstsun-dev/.github/.github/workflows/_cf-worker-template.yml@v1
-    secrets: inherit
-    with:
-      app_name: anas-mcp
-      app_path: .
-      app_version: <project version>
-      build_cmd: <verified build/check command>
-```
+`anas-mcp` keeps a thin caller (`.github/workflows/cicd.yml`): `deployment_strategy: production-only`, `uses` and `tools_ref` pinned to the same full commit SHA, push trigger only. See `docs/cicd.md` for the exact inputs.
 
 Do not copy the shared `wrangler versions upload/deploy`, rollback, or generic runner logic into this repository.
 
-The project uses pnpm (`packageManager` pinned, `pnpm-lock.yaml` committed) to match the central workflow. `.github/workflows/cicd.yml` calls the template pinned at `@v1.5.0` on pushes to `main` only; pull requests run the test-only `pr-verify.yml`. There is no automatic rollback; post-deploy smoke failures require operator action.
+The project uses pnpm (`packageManager` pinned, `pnpm-lock.yaml` committed) to match the central workflow. `.github/workflows/cicd.yml` calls `_cf-worker-v2.yml` pinned to a commit SHA (`production-only`): every branch push runs verification, only `main` deploys. There is no automatic rollback; post-deploy smoke failures require operator action.
 
-See `docs/cicd.md` and `openspec/changes/use-centralized-cf-worker-ci/`.
+See `docs/cicd.md` and `openspec/changes/adopt-cf-worker-v2-ci/`.
 
 ## Current state
 
