@@ -75,7 +75,7 @@ Every combination is **fail-closed**. A bad rollout costs availability, not expo
 
 ### Unverified assumptions (check before relying on them)
 
-- Which Worker version is live in production and how it was deployed. This repository has no deployment workflow, Actions deployment run or recorded GitHub deployment (only the test-only `pr-verify.yml` exists).
+- Which Worker version is live in production and how it was deployed. This repository has no deployment workflow, Actions deployment run or recorded GitHub deployment (only the v2 caller `cicd.yml` exists; deployments run from `main`).
 - Whether `infra-config` PR #68 has been applied. Merged is not applied.
 - That Worker `vars` travel with a Worker version, so redeploying an earlier new-Worker version restores its own vars.
 - Whether Managed OAuth forwards an `Authorization` header to the origin. The new Worker ignores it; the previous Worker would treat an Access-issued token as a wrong key.

@@ -83,84 +83,94 @@ describe("repository guardrails", () => {
     expect(code).not.toMatch(/allowed(Origin)?Hostnames:\s*"\*"/);
     expect(code).not.toMatch(/MCP_PUBLIC_HOSTNAME\s*=\s*"[^"]*\*/);
   });
-  it("the PR verification workflow cannot deploy: pull_request only, read-only, no secrets, dry-run wrangler, hosted runner", () => {
-    const wf = read(".github/workflows/pr-verify.yml");
-    const code = wf.replace(/^\s*#.*$/gm, "");
-    expect(code).toMatch(/^on:\s*\n\s+pull_request:\s*$/m);
-    expect(code).not.toMatch(/^\s+(push|workflow_dispatch|schedule|pull_request_target|workflow_run):/m);
-    expect(code).toMatch(/permissions:\s*\n\s+contents: read\s*\n/);
-    expect(code).not.toMatch(/\bsecrets\b|CLOUDFLARE_|id-token|contents: write|uses:\s*firstsun-dev\//);
-    expect(code).not.toMatch(/wrangler (deploy(?! --dry-run)|versions|rollback|secret)/);
-    expect(code).toMatch(/pnpm install --frozen-lockfile/);
-    expect(code).toMatch(/pnpm run check/);
-    expect(code).toMatch(/pnpm exec wrangler deploy --dry-run/);
-    expect(code).not.toMatch(/\bnpm\b|\bnpx\b/);
-    expect(code).toMatch(/runs-on:\s*ubuntu-latest/);
+  it("the superseded test-only PR workflow is gone (verification is the v2 pipeline's non-main path)", () => {
+    expect(existsSync(new URL("../.github/workflows/pr-verify.yml", import.meta.url))).toBe(false);
   });
-  describe("production CI/CD caller", () => {
+  describe("production CI/CD caller (_cf-worker-v2.yml, production-only)", () => {
     const raw = read(".github/workflows/cicd.yml");
     const code = raw.replace(/^\s*#.*$/gm, "");
     const wf = parse(raw) as Record<string, any>;
-    // Inputs published by _cf-worker-template.yml@v1.5.0 (verified against the tag); an unknown input fails the caller.
-    const TEMPLATE_INPUTS = new Set([
-      "app_name", "app_path", "app_version", "build_cmd", "migrate_cmd_prod", "migrate_cmd_dev", "test_unit_cmd",
-      "test_integration_cmd", "test_e2e_setup_cmd", "test_e2e_cmd", "test_e2e_variants", "verify_cmd", "app_url_prod",
-      "app_url_dev", "runner", "use_mailpit", "vite_env_prod", "vite_env_dev", "test_e2e_env", "verify_env",
-      "enable_preview_alias", "worker_name_dev",
+    // Inputs / secrets published by _cf-worker-v2.yml at the pinned commit; an unknown key fails the caller.
+    const V2_INPUTS = new Set([
+      "tools_ref", "app_name", "app_path", "app_version", "deployment_strategy", "preview_on_branch_push",
+      "shared_dev_on_branch_push", "preview_worker_name", "wrangler_config", "lint_cmd", "typecheck_cmd", "test_unit_cmd",
+      "test_integration_cmd", "build_cmd", "ci_env", "use_mailpit", "test_e2e_cmd", "test_e2e_setup_cmd",
+      "test_e2e_build_cmd", "test_e2e_variants", "test_e2e_env", "build_env_prod", "build_env_preview", "build_env_dev",
+      "smoke_cmd", "smoke_env", "access_protected_targets", "sha_path", "preview_host_check", "preview_binding_allow",
+      "preview_deny_resources", "app_url_prod", "production_rollback_policy", "d1_migrations", "d1_binding",
+      "d1_lock_scope", "release_cmd", "persistent_dev_ref", "dev_deploy_cmd", "dev_smoke_cmd", "app_url_dev",
+      "dev_build_cmd", "dev_wrangler_env", "dev_binding_allow", "dev_deny_resources", "dev_worker_name",
+      "dispatch_target", "runner",
     ]);
+    const V2_SECRETS = new Set([
+      "CLOUDFLARE_PREVIEW_API_TOKEN", "CLOUDFLARE_PREVIEW_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
+      "CLOUDFLARE_DEV_API_TOKEN", "CLOUDFLARE_DEV_ACCOUNT_ID", "PREVIEW_SECRETS", "SMOKE_USERNAME", "SMOKE_PASSWORD",
+      "RELEASE_TOKEN",
+    ]);
+    const job = wf.jobs.cf;
 
-    it("triggers on push to main only (no PR, dispatch, schedule, or other branches)", () => {
-      expect(wf.on).toEqual({ push: { branches: ["main"] } });
+    it("triggers on push only: no pull_request (public repo, self-hosted runners), workflow_dispatch, delete or schedule", () => {
+      expect(Object.keys(wf.on)).toEqual(["push"]);
     });
-    it("delegates to the reusable workflow pinned to an immutable-style release ref, with only supported inputs", () => {
-      const pipeline = wf.jobs.pipeline;
-      expect(pipeline.uses).toMatch(
-        /^firstsun-dev\/\.github\/\.github\/workflows\/_cf-worker-template\.yml@(v\d+\.\d+\.\d+|[0-9a-f]{40})$/,
-      );
-      expect(pipeline.uses).not.toMatch(/@(main|master|v\d+)$/);
-      for (const key of Object.keys(pipeline.with)) expect(TEMPLATE_INPUTS.has(key), key).toBe(true);
-      expect(pipeline.with).toMatchObject({
+    it("pins uses and tools_ref to the same full commit SHA, with only inputs and secrets v2 declares", () => {
+      const m = /^firstsun-dev\/\.github\/\.github\/workflows\/_cf-worker-v2\.yml@([0-9a-f]{40})$/.exec(job.uses);
+      expect(m, job.uses).not.toBeNull();
+      expect(job.with.tools_ref).toBe(m![1]);
+      for (const key of Object.keys(job.with)) expect(V2_INPUTS.has(key), key).toBe(true);
+      for (const key of Object.keys(job.secrets)) expect(V2_SECRETS.has(key), key).toBe(true);
+      expect(job.secrets).not.toBe("inherit");
+    });
+    it("is production-only: no Native Preview, Shared Dev, persistent Dev or Preview credentials", () => {
+      expect(job.with).toMatchObject({
+        deployment_strategy: "production-only",
+        preview_on_branch_push: false,
+        shared_dev_on_branch_push: false,
+      });
+      for (const k of ["app_url_dev", "dev_worker_name", "dev_build_cmd", "persistent_dev_ref", "dispatch_target", "preview_worker_name", "release_cmd", "d1_migrations"])
+        expect(Object.keys(job.with)).not.toContain(k);
+      expect(Object.keys(job.secrets).sort()).toEqual(["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"]);
+    });
+    it("runs the aggregate check, validates the Wrangler build and targets the production hostname", () => {
+      expect(job.with).toMatchObject({
         app_name: "anas-mcp",
         app_path: ".",
+        wrangler_config: "wrangler.jsonc",
         test_unit_cmd: "pnpm run check",
         build_cmd: "pnpm exec wrangler deploy --dry-run",
         app_url_prod: "https://mcp.firstsun.org",
+        production_rollback_policy: "manual", // an older version may predate Access
       });
-      expect(pipeline.with.app_version).toBe("${{ github.sha }}");
+      expect(Object.keys(job.with)).not.toContain("runner"); // the shared CI action needs the self-hosted default
+      expect(job.with.app_version).toBe("${{ github.sha }}");
     });
-    it("does not enable dev/preview deploys or the rollback-capable verify path", () => {
-      const keys = Object.keys(wf.jobs.pipeline.with);
-      for (const k of ["verify_cmd", "app_url_dev", "worker_name_dev", "enable_preview_alias", "migrate_cmd_prod", "migrate_cmd_dev"])
-        expect(keys).not.toContain(k);
-    });
-    it("serializes production deploys without cancelling an in-flight one", () => {
-      expect(wf.concurrency).toEqual({ group: "anas-mcp-production-deploy", "cancel-in-progress": false });
+    it("is a single thin job without caller-level concurrency (the callee owns the cfv2- groups)", () => {
+      expect(Object.keys(wf.jobs)).toEqual(["cf"]);
+      expect(wf.concurrency).toBeUndefined();
+      expect(wf.permissions).toEqual({ contents: "write", deployments: "write", "pull-requests": "write" });
     });
     it("duplicates no deployment logic: no wrangler upload/deploy/rollback/secret commands in the caller or smoke script", () => {
       const smoke = read("scripts/smoke-prod.sh").replace(/^\s*#.*$/gm, "");
       for (const text of [code, smoke]) {
         expect(text).not.toMatch(/wrangler (deploy(?! --dry-run)|versions|rollback|secret|publish)/);
-        expect(text).not.toMatch(/CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID|--var\b|--env\b/);
+        expect(text).not.toMatch(/--var\b|--env\b/);
       }
-      expect(Object.keys(wf.jobs).sort()).toEqual(["pipeline", "smoke"]);
+      expect(code).not.toMatch(/\brun:/);
     });
-    it("smoke job is credential-free, GitHub-hosted, read-only, and never reverts", () => {
-      const smoke = wf.jobs.smoke;
-      expect(smoke.needs).toBe("pipeline");
-      expect(smoke["runs-on"]).toBe("ubuntu-latest");
-      expect(smoke.permissions).toEqual({ contents: "read" });
-      expect(JSON.stringify(smoke)).not.toMatch(/secrets\./);
+    it("smoke is credential-free, read-only and never reverts", () => {
+      expect(job.with.smoke_cmd).toBe("scripts/smoke-prod.sh");
       const script = read("scripts/smoke-prod.sh").replace(/^\s*#.*$/gm, "");
       expect(script).not.toMatch(/-X (PUT|DELETE|PATCH)|-H\s+["']?authorization|cf-access-client|wrangler|versions deploy/i);
     });
     it("smoke targets match the Worker's configured hostname and Access issuer (no drift)", () => {
-      const env = wf.jobs.smoke.steps.find((s: any) => s.env).env;
+      const env = Object.fromEntries(
+        String(job.with.smoke_env).trim().split("\n").map((l: string) => l.trim().split(/=(.*)/s).slice(0, 2)),
+      );
       const vars = (JSON.parse(stripComments(read("wrangler.jsonc"))) as any).vars;
       expect(env.EXPECTED_ISSUER).toBe(`https://${vars.ACCESS_TEAM_DOMAIN}`);
       expect(env.BASE_URL).toBe("https://mcp.firstsun.org");
       expect(read("src/index.ts")).toContain('MCP_PUBLIC_HOSTNAME = "mcp.firstsun.org"');
     });
-    it("the shared template's --var COMMIT_HASH/VERSION cannot collide with configured vars", () => {
+    it("the shared engine's --var COMMIT_HASH/VERSION cannot collide with configured vars", () => {
       const vars = (JSON.parse(stripComments(read("wrangler.jsonc"))) as any).vars;
       expect(Object.keys(vars)).not.toContain("COMMIT_HASH");
       expect(Object.keys(vars)).not.toContain("VERSION");
