@@ -109,8 +109,8 @@ describe("repository guardrails", () => {
     ]);
     const job = wf.jobs.cf;
 
-    it("triggers on push and pull_request only (no workflow_dispatch, delete, schedule)", () => {
-      expect(Object.keys(wf.on).sort()).toEqual(["pull_request", "push"]);
+    it("triggers on push only: no pull_request (public repo, self-hosted runners), workflow_dispatch, delete or schedule", () => {
+      expect(Object.keys(wf.on)).toEqual(["push"]);
     });
     it("pins uses and tools_ref to the same full commit SHA, with only inputs and secrets v2 declares", () => {
       const m = /^firstsun-dev\/\.github\/\.github\/workflows\/_cf-worker-v2\.yml@([0-9a-f]{40})$/.exec(job.uses);
@@ -138,9 +138,9 @@ describe("repository guardrails", () => {
         test_unit_cmd: "pnpm run check",
         build_cmd: "pnpm exec wrangler deploy --dry-run",
         app_url_prod: "https://mcp.firstsun.org",
-        runner: "ubuntu-latest", // public repo: fork-PR CI must not reach self-hosted runners
         production_rollback_policy: "manual", // an older version may predate Access
       });
+      expect(Object.keys(job.with)).not.toContain("runner"); // the shared CI action needs the self-hosted default
       expect(job.with.app_version).toBe("${{ github.sha }}");
     });
     it("is a single thin job without caller-level concurrency (the callee owns the cfv2- groups)", () => {

@@ -4,12 +4,13 @@ name: CI/CD
 # version-upload, deploy or rollback logic. Strategy is `production-only`: every branch push / same-repo PR runs
 # verification only; ONLY a push to `main` deploys Production. No Native Preview, no Shared Dev, no persistent Dev.
 #
-# Deliberately NOT triggered by `workflow_dispatch` (it would deploy Production from main) or `delete` (the
-# lifecycle job is skipped for production-only).
+# Deliberately NOT triggered by `workflow_dispatch` (it would deploy Production from main), `delete` (the lifecycle
+# job is skipped for production-only) or `pull_request`: the shared CI jobs need the org's self-hosted runners (the
+# shared setup action expects a pre-installed pnpm; verified to fail on ubuntu-latest), and this repository is public,
+# so a fork PR must never reach them. Only branches of this repository run CI, and only `main` deploys.
 
 on:
-  push: # all branches: verification-only except main
-  pull_request:
+  push: # all branches: verification-only except main (same-repo PRs are covered by their branch push)
 
 permissions:
   contents: write # ceiling required by the callee's (here skipped, release_cmd unset) Release job; the Deploy job itself is contents: read
@@ -34,8 +35,6 @@ jobs:
       # Wrangler bundles the Worker in `versions upload`; this is a credential-free build-validation gate only.
       build_cmd: pnpm exec wrangler deploy --dry-run
       app_url_prod: https://mcp.firstsun.org
-      # GitHub-hosted: this repository is public, so fork-PR code must not run on the org's self-hosted runners.
-      runner: ubuntu-latest
       # Never auto-revert: a previous Worker version may predate Cloudflare Access authentication.
       production_rollback_policy: manual
       smoke_cmd: scripts/smoke-prod.sh
