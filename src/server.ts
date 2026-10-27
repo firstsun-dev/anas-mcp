@@ -39,6 +39,7 @@ export function createServer(env: Env = {}) {
       title: "Analytics MCP health",
       description: "Return the current service health, the data sources that are enabled now, and those still planned.",
       inputSchema: z.object({}),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => ({
       content: [
