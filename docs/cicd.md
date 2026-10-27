@@ -102,7 +102,7 @@ Transport errors (DNS, connect, timeout) and HTTP `5xx` are retried up to 6 requ
 
 ## Package manager
 
-The repository uses **pnpm** (`packageManager: pnpm@10.33.0`, matching `blog`, `heaven-monorepo` and `innovation-apps`), with a committed `pnpm-lock.yaml` and `pnpm-workspace.yaml` (`allowBuilds`). `package-lock.json` is removed. The shared setup action runs `pnpm install --frozen-lockfile` and the template calls `pnpm exec wrangler`; both were exercised locally with pnpm 10.33.0 on Node 24 (the template's `NODE_VERSION`). The self-hosted runner image bakes in Node/pnpm (`setup-node`/`setup-pnpm: false`); its pnpm version cannot be inspected from here and is verified only by the first run on `main`.
+The repository uses **pnpm** (`packageManager: pnpm@12.14.0`), with a committed `pnpm-lock.yaml` and `pnpm-workspace.yaml` (`allowBuilds`). `package-lock.json` is removed. The shared setup action runs `pnpm install --frozen-lockfile` and the shared engine calls `pnpm exec wrangler`; both were exercised locally with pnpm 12.14.0 on Node 24. The self-hosted runner image bakes in Node/pnpm (`setup-node`/`setup-pnpm: false`); the Build Validation and Unit Tests jobs of the first v2 run on `main` (run 39759742628) installed and ran with it successfully.
 
 ## Production release gates (status as of 2026-10-15)
 
