@@ -98,11 +98,11 @@ The deployment implementation belongs to:
 firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml
 ```
 
-`anas-mcp` keeps a thin caller (`.github/workflows/cicd.yml`): `deployment_strategy: production-only`, `uses` and `tools_ref` pinned to the same full commit SHA, push trigger only. See `docs/cicd.md` for the exact inputs.
+`anas-mcp` keeps a thin caller (`.github/workflows/cicd.yml`): `deployment_strategy: production-only`, `uses` and `tools_ref` set to the same ref (`v2`), push trigger only. See `docs/cicd.md` for the exact inputs.
 
 Do not copy the shared `wrangler versions upload/deploy`, rollback, or generic runner logic into this repository.
 
-The project uses pnpm (`packageManager` pinned, `pnpm-lock.yaml` committed) to match the central workflow. `.github/workflows/cicd.yml` calls `_cf-worker-v2.yml` pinned to a commit SHA (`production-only`): every branch push runs verification, only `main` deploys. There is no automatic rollback; post-deploy smoke failures require operator action.
+The project uses pnpm (`packageManager` pinned, `pnpm-lock.yaml` committed) to match the central workflow. `.github/workflows/cicd.yml` calls `_cf-worker-v2.yml` at `@v2` (`production-only`): every branch push runs verification, only `main` deploys. There is no automatic rollback; post-deploy smoke failures require operator action.
 
 See `docs/cicd.md` and `openspec/changes/adopt-cf-worker-v2-ci/`.
 

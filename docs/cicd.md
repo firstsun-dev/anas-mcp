@@ -9,10 +9,10 @@ The application repository may contain a thin caller workflow that defines trigg
 Canonical reusable workflow:
 
 ```yaml
-uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@026f5b40e9a6570005a8b30c2ae48338bb71337f
+uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@v2
 ```
 
-The caller pins a full commit SHA, and `tools_ref` MUST be the same SHA (the engine checks out its tooling at `tools_ref`). Do not point production deployment at a branch or a floating tag.
+The caller pins the floating major tag `@v2` (owner decision; a full SHA would be stricter but needs a bump per shared fix), and `tools_ref` MUST be the same ref (the engine checks out its tooling at `tools_ref`). Do not point production deployment at a branch or a floating tag.
 
 ## Ownership
 
@@ -48,7 +48,7 @@ The caller workflow must remain thin.
 
 ## Production caller (`.github/workflows/cicd.yml`)
 
-Migrated from `_cf-worker-template.yml@v1.5.0` to `_cf-worker-v2.yml` at `firstsun-dev/.github` commit `026f5b40e9a6570005a8b30c2ae48338bb71337f` (main HEAD when re-verified, 2026-10-22; includes the 0e01649 Deploy tooling-install fix; `docs/cf-worker-v2.md` read at that commit). The shared repository is consumed unmodified. Tracking issue: firstsun-dev/anas-mcp#32.
+Migrated from `_cf-worker-template.yml@v1.5.0` to `_cf-worker-v2.yml` at `firstsun-dev/.github` tag `v2` (resolved to `09971103f238bcec1c2a907a84548370218e2374` on 2026-10-28; docs read at that ref). The shared repository is consumed unmodified. Tracking issue: firstsun-dev/anas-mcp#32.
 
 - **Strategy: `production-only`.** `preview_on_branch_push: false`, `shared_dev_on_branch_push: false`; no Native Preview, no Shared Dev, no persistent Dev, no Preview/Dev credentials. A non-`main` push runs verification only (Lint/Typecheck/Unit/Build Validation jobs of the shared workflow); only a push to `main` reaches the Deploy job. `workers_dev: false` / `preview_urls: false` stay in `wrangler.jsonc` (guardrail test).
 - **Triggers: `push` only.** `workflow_dispatch` is omitted because on `main` it would be a manual Production deploy path; `delete` is omitted because the lifecycle job is skipped for `production-only`; `pull_request` is omitted because the shared CI action requires the org's self-hosted runner (it needs a pre-installed pnpm: a trial on `ubuntu-latest` failed with `pnpm: command not found`) and this repository is public, so a fork PR must never reach that runner. Same-repo PRs are verified by their branch push. The shared documentation says callers "MUST" also trigger on `pull_request`/`delete`/`workflow_dispatch`; that is deliberately not followed for the reasons above.
@@ -59,9 +59,9 @@ Migrated from `_cf-worker-template.yml@v1.5.0` to `_cf-worker-v2.yml` at `firsts
 - **Engine behaviour that replaces the v1 template:** `wrangler versions upload` + `versions deploy @100` on the audited config; the `--var COMMIT_HASH/VERSION` behaviour described below is unchanged.
 - **Contract check.** Every `with:`/`secrets:` key of the caller is declared by the pinned workflow; `tests/repo-guardrails.test.ts` enforces the key set, the SHA/`tools_ref` match and the production-only settings. To bump the SHA, re-read `_cf-worker-v2.yml` and `docs/cf-worker-v2.md` at the new commit and update both refs together.
 
-### Known gap: the shared smoke probe requests `<app_url_prod>/` and requires a 2xx
+### Smoke probe path (`probe_path: /health`)
 
-The v2 Deploy job always runs the engine's built-in probe before `smoke_cmd`: it GETs `<app_url_prod>/` and accepts only 2xx (or an Access login redirect, which `access_protected_targets` accepts for `preview` by default, not `prod`). `https://mcp.firstsun.org/` currently returns **404** (the Worker serves only `/health` and `/anas/mcp`), and there is no input to change the probe path. A Production deploy from this caller therefore publishes the new version and then reports the run failed at the smoke step (rollback is manual, so the version stays live). This must be resolved before merging (either the Worker answers `GET /` with 2xx, or the shared engine gains a probe-path input); it is deliberately not worked around here by loosening the shared engine or adding unreviewed Worker surface.
+The engine's built-in post-deploy probe requests `<app_url_prod><probe_path>` and requires a 2xx. The Worker has no route at `/` (404), which made every Production deploy report failure after the new version was already live (runs 39759742628, 40470181875, 40473119843; shared issue firstsun-dev/.github#71). `@v2` now provides `probe_path` (firstsun-dev/.github#73), so the caller sets `probe_path: /health` (200 `{service:"anas-mcp",status:"ok"}`); no Worker change. `scripts/smoke-prod.sh` runs afterwards as `smoke_cmd`. A guardrail test pins this input.
 
 ### Effective production configuration (verified non-deploying)
 

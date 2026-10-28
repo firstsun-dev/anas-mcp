@@ -3,5 +3,5 @@
 - [x] Migrate `cicd.yml`; remove `pr-verify.yml`; update guardrail tests, docs, AGENTS/README/project.md.
 - [x] Local gate: `pnpm install --frozen-lockfile && pnpm run check` (394 passed, 22 skipped; OpenAPI valid).
 - [x] Branch push run: Build Validation + Unit Tests success, Deploy skipped (non-main), Preview/Dev jobs skipped.
-- [ ] Resolve the smoke-probe gap (`GET /` is 404) before merge.
+- [x] Smoke-probe gap (`GET /` is 404): fixed via `probe_path: /health` (shared v2 `probe_path`, .github#73).
 - [ ] Production deploy after merge, then live smoke verification (not yet run).
