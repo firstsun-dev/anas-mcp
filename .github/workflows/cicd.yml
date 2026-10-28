@@ -19,10 +19,10 @@ permissions:
 
 jobs:
   cf:
-    # uses and tools_ref MUST be the same ref (verified commit of firstsun-dev/.github; see docs/cicd.md).
-    uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@026f5b40e9a6570005a8b30c2ae48338bb71337f
+    # uses and tools_ref MUST be the same ref (floating major tag, per owner decision; see docs/cicd.md).
+    uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@v2
     with:
-      tools_ref: 026f5b40e9a6570005a8b30c2ae48338bb71337f
+      tools_ref: v2
       app_name: anas-mcp
       app_path: .
       app_version: ${{ github.sha }}
@@ -35,6 +35,8 @@ jobs:
       # Wrangler bundles the Worker in `versions upload`; this is a credential-free build-validation gate only.
       build_cmd: pnpm exec wrangler deploy --dry-run
       app_url_prod: https://mcp.firstsun.org
+      # The Worker has no route at `/` (404); the built-in post-deploy liveness probe requests /health (200) instead.
+      probe_path: /health
       # Never auto-revert: a previous Worker version may predate Cloudflare Access authentication.
       production_rollback_policy: manual
       smoke_cmd: scripts/smoke-prod.sh

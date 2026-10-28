@@ -96,7 +96,7 @@ describe("repository guardrails", () => {
       "shared_dev_on_branch_push", "preview_worker_name", "wrangler_config", "lint_cmd", "typecheck_cmd", "test_unit_cmd",
       "test_integration_cmd", "build_cmd", "ci_env", "use_mailpit", "test_e2e_cmd", "test_e2e_setup_cmd",
       "test_e2e_build_cmd", "test_e2e_variants", "test_e2e_env", "build_env_prod", "build_env_preview", "build_env_dev",
-      "smoke_cmd", "smoke_env", "access_protected_targets", "sha_path", "preview_host_check", "preview_binding_allow",
+      "smoke_cmd", "smoke_env", "access_protected_targets", "probe_path", "probe_expect_status", "sha_path", "preview_host_check", "preview_binding_allow",
       "preview_deny_resources", "app_url_prod", "production_rollback_policy", "d1_migrations", "d1_binding",
       "d1_lock_scope", "release_cmd", "persistent_dev_ref", "dev_deploy_cmd", "dev_smoke_cmd", "app_url_dev",
       "dev_build_cmd", "dev_wrangler_env", "dev_binding_allow", "dev_deny_resources", "dev_worker_name",
@@ -112,8 +112,8 @@ describe("repository guardrails", () => {
     it("triggers on push only: no pull_request (public repo, self-hosted runners), workflow_dispatch, delete or schedule", () => {
       expect(Object.keys(wf.on)).toEqual(["push"]);
     });
-    it("pins uses and tools_ref to the same full commit SHA, with only inputs and secrets v2 declares", () => {
-      const m = /^firstsun-dev\/\.github\/\.github\/workflows\/_cf-worker-v2\.yml@([0-9a-f]{40})$/.exec(job.uses);
+    it("pins uses and tools_ref to the same ref (the v2 major tag), with only inputs and secrets v2 declares", () => {
+      const m = /^firstsun-dev\/\.github\/\.github\/workflows\/_cf-worker-v2\.yml@(v2)$/.exec(job.uses);
       expect(m, job.uses).not.toBeNull();
       expect(job.with.tools_ref).toBe(m![1]);
       for (const key of Object.keys(job.with)) expect(V2_INPUTS.has(key), key).toBe(true);
@@ -138,6 +138,7 @@ describe("repository guardrails", () => {
         test_unit_cmd: "pnpm run check",
         build_cmd: "pnpm exec wrangler deploy --dry-run",
         app_url_prod: "https://mcp.firstsun.org",
+        probe_path: "/health", // the Worker has no route at / (404); /health is the 200 liveness route
         production_rollback_policy: "manual", // an older version may predate Access
       });
       expect(Object.keys(job.with)).not.toContain("runner"); // the shared CI action needs the self-hosted default
