@@ -92,7 +92,7 @@ describe("repository guardrails", () => {
     const wf = parse(raw) as Record<string, any>;
     // Inputs / secrets published by _cf-worker-v2.yml at the pinned commit; an unknown key fails the caller.
     const V2_INPUTS = new Set([
-      "tools_ref", "app_name", "app_path", "app_version", "deployment_strategy", "preview_on_branch_push",
+      "app_name", "app_path", "app_version", "deployment_strategy", "preview_on_branch_push",
       "shared_dev_on_branch_push", "preview_worker_name", "wrangler_config", "lint_cmd", "typecheck_cmd", "test_unit_cmd",
       "test_integration_cmd", "build_cmd", "ci_env", "use_mailpit", "test_e2e_cmd", "test_e2e_setup_cmd",
       "test_e2e_build_cmd", "test_e2e_variants", "test_e2e_env", "build_env_prod", "build_env_preview", "build_env_dev",
@@ -112,10 +112,11 @@ describe("repository guardrails", () => {
     it("triggers on push only: no pull_request (public repo, self-hosted runners), workflow_dispatch, delete or schedule", () => {
       expect(Object.keys(wf.on)).toEqual(["push"]);
     });
-    it("pins uses and tools_ref to the same ref (the v2 major tag), with only inputs and secrets v2 declares", () => {
+    it("pins uses to the v2 major tag and does not pass the retired tools_ref input, with only inputs and secrets v2 declares", () => {
       const m = /^firstsun-dev\/\.github\/\.github\/workflows\/_cf-worker-v2\.yml@(v2)$/.exec(job.uses);
       expect(m, job.uses).not.toBeNull();
-      expect(job.with.tools_ref).toBe(m![1]);
+      expect(job.with).not.toHaveProperty("tools_ref");
+      expect(code).not.toContain("tools_ref:");
       for (const key of Object.keys(job.with)) expect(V2_INPUTS.has(key), key).toBe(true);
       for (const key of Object.keys(job.secrets)) expect(V2_SECRETS.has(key), key).toBe(true);
       expect(job.secrets).not.toBe("inherit");

@@ -19,10 +19,9 @@ permissions:
 
 jobs:
   cf:
-    # uses and tools_ref MUST be the same ref (floating major tag, per owner decision; see docs/cicd.md).
+    # Floating major tag, per owner decision; see docs/cicd.md. The retired `tools_ref` input is intentionally not passed.
     uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@v2
     with:
-      tools_ref: v2
       app_name: anas-mcp
       app_path: .
       app_version: ${{ github.sha }}

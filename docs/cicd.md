@@ -12,7 +12,7 @@ Canonical reusable workflow:
 uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@v2
 ```
 
-The caller pins the floating major tag `@v2` (owner decision; a full SHA would be stricter but needs a bump per shared fix), and `tools_ref` MUST be the same ref (the engine checks out its tooling at `tools_ref`). Do not point production deployment at a branch or a floating tag.
+The caller pins the floating major tag `@v2` (owner decision; a full SHA would be stricter but needs a bump per shared fix). The retired `tools_ref` input is not passed (the shared workflow loads its tooling from its own commit). Do not point production deployment at a branch or a floating tag.
 
 ## Ownership
 
@@ -57,7 +57,7 @@ Migrated from `_cf-worker-template.yml@v1.5.0` to `_cf-worker-v2.yml` at `firsts
 - **Credentials.** Only `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are passed explicitly (no `secrets: inherit`); they are only reachable by the main-branch Deploy job. Smoke receives no secret.
 - **Serialization.** The shared workflow owns the run-level `cfv2-prod-anas-mcp` concurrency group (`queue: max`, FIFO); the caller declares none (a caller group using the `cfv2-` prefix would deadlock).
 - **Engine behaviour that replaces the v1 template:** `wrangler versions upload` + `versions deploy @100` on the audited config; the `--var COMMIT_HASH/VERSION` behaviour described below is unchanged.
-- **Contract check.** Every `with:`/`secrets:` key of the caller is declared by the pinned workflow; `tests/repo-guardrails.test.ts` enforces the key set, the SHA/`tools_ref` match and the production-only settings. To bump the SHA, re-read `_cf-worker-v2.yml` and `docs/cf-worker-v2.md` at the new commit and update both refs together.
+- **Contract check.** Every `with:`/`secrets:` key of the caller is declared by the pinned workflow; `tests/repo-guardrails.test.ts` enforces the key set, the absence of `tools_ref` and the production-only settings. To bump the SHA, re-read `_cf-worker-v2.yml` and `docs/cf-worker-v2.md` at the new commit and update both refs together.
 
 ### Smoke probe path (`probe_path: /health`)
 
