@@ -1,5 +1,8 @@
 # anas-mcp
 
+> [!IMPORTANT]
+> **Migration notice.** `anas-mcp` is moving to the monorepo [`firstsun-dev/innovation-apps`](https://github.com/firstsun-dev/innovation-apps) under [`apps/anas-mcp`](https://github.com/firstsun-dev/innovation-apps/tree/main/apps/anas-mcp), which is the new home and the sole deployment owner of the `anas-mcp` Worker. This repository is the **historical source** only: it keeps CI verification, but its Production deploy path is retired (see [`docs/cutover.md`](docs/cutover.md)). Open new issues and PRs in the monorepo.
+
 Cloudflare-hosted, read-only Remote MCP service for Firstsun analytics.
 
 ## Architecture
@@ -32,7 +35,7 @@ createMcpHandler() --> read-only analytics tools
 - **Credentials:** Secrets Store first. Any long-lived secret consumed directly by this Worker should come from Cloudflare Secrets Store whenever supported.
 - **Google OAuth:** one JSON credential stored in Cloudflare Secrets Store.
 - **Database:** read-only PostgreSQL access through Cloudflare Hyperdrive; the database password remains managed by Hyperdrive and is not duplicated into Worker secrets.
-- **CI/CD:** Cloudflare Worker deployment is implemented centrally in `firstsun-dev/.github`; this repository must use a thin caller for the shared `_cf-worker-v2.yml` workflow (production-only) rather than duplicating deploy steps.
+- **CI/CD:** deployment ownership moved to `firstsun-dev/innovation-apps` (`apps/anas-mcp`); this repository's CI is verification-only (see `docs/cutover.md`).
 
 See:
 
@@ -41,7 +44,8 @@ See:
 - `docs/gsc.md` for the Search Console tools, data caveats and operator checklist
 - `docs/clarity.md` for the Clarity tools, data semantics and configuration
 - `docs/credentials.md` for credential ownership/storage policy
-- `docs/cicd.md` for centralized deployment policy and caller-workflow contract
+- `docs/cutover.md` for the standalone-deployment retirement runbook
+- `docs/cicd.md` for the historical centralized deployment policy
 
 ## OpenAPI / Swagger policy
 
@@ -92,19 +96,7 @@ Intentional exceptions:
 
 ## CI/CD policy summary
 
-The deployment implementation belongs to:
-
-```text
-firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml
-```
-
-`anas-mcp` keeps a thin caller (`.github/workflows/cicd.yml`): `deployment_strategy: production-only`, `uses` pinned to `v2` (no `tools_ref`; the retired input is not passed), push trigger only. See `docs/cicd.md` for the exact inputs.
-
-Do not copy the shared `wrangler versions upload/deploy`, rollback, or generic runner logic into this repository.
-
-The project uses pnpm (`packageManager` pinned, `pnpm-lock.yaml` committed) to match the central workflow. `.github/workflows/cicd.yml` calls `_cf-worker-v2.yml` at `@v2` (`production-only`): every branch push runs verification, only `main` deploys. There is no automatic rollback; post-deploy smoke failures require operator action.
-
-See `docs/cicd.md` and `openspec/changes/adopt-cf-worker-v2-ci/`.
+Deployment ownership of the `anas-mcp` Worker has moved to `firstsun-dev/innovation-apps` (`apps/anas-mcp`). `.github/workflows/cicd.yml` in this repository is **verification-only** (push trigger, GitHub-hosted runner, read-only permissions, no secrets): `pnpm install --frozen-lockfile`, `pnpm run check`, `wrangler deploy --dry-run`. It must not regain a deploy path or call the shared `_cf-worker-v2.yml` deploy pipeline. See `docs/cutover.md` for the runbook and `docs/cicd.md` for the history of the previous centralized-pipeline decision.
 
 ## Current state
 
