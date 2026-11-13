@@ -98,7 +98,7 @@ The deployment implementation belongs to:
 firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml
 ```
 
-`anas-mcp` keeps a thin caller (`.github/workflows/cicd.yml`): `deployment_strategy: production-only`, `uses` and `tools_ref` set to the same ref (`v2`), push trigger only. See `docs/cicd.md` for the exact inputs.
+`anas-mcp` keeps a thin caller (`.github/workflows/cicd.yml`): `deployment_strategy: production-only`, `uses` pinned to `v2` (no `tools_ref`; the retired input is not passed), push trigger only. See `docs/cicd.md` for the exact inputs.
 
 Do not copy the shared `wrangler versions upload/deploy`, rollback, or generic runner logic into this repository.
 
