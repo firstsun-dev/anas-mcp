@@ -1,5 +1,7 @@
 # CI/CD
 
+> **Retired after monorepo migration.** Deployment ownership of the Worker `anas-mcp` moved to `firstsun-dev/innovation-apps` (`apps/anas-mcp`). `.github/workflows/cicd.yml` is now verification-only (no reusable-pipeline call, no secrets, `contents: read`); see `docs/cutover.md`. Everything below describes the previous centralized deployment decision and is kept as historical rationale. It no longer describes the workflow in this repository.
+
 ## Decision
 
 `anas-mcp` uses the reusable Cloudflare Worker pipeline maintained in `firstsun-dev/.github` for deployment.
