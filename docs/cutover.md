@@ -39,13 +39,16 @@ gh run cancel <run-id> --repo firstsun-dev/anas-mcp
 
 ## Check the deployed known-good Worker version (read-only)
 
-Run from a checkout with Cloudflare authentication (do not paste credentials anywhere):
+Run from a checkout with Cloudflare authentication (do not paste credentials anywhere). The Worker lives in account `d42c339b4d119552704de967440f8dd7`; an operator login usually sees two accounts, so the account id must be set or wrangler fails non-interactively (it is an identifier, not a secret):
 
 ```bash
+export CLOUDFLARE_ACCOUNT_ID=d42c339b4d119552704de967440f8dd7
 pnpm exec wrangler deployments list --name anas-mcp
 pnpm exec wrangler versions list --name anas-mcp
 curl -s https://mcp.firstsun.org/health
 ```
+
+Known-good version recorded 2026-11-14 (read-only): `482101ae-ed7f-47d6-a84a-29fa40901531` (100%, created 2026-11-13T02:47:12Z, built from `cd3e35c`). Re-read it immediately before the cutover. After cutover, deploy ownership is `firstsun-dev/innovation-apps` `.github/workflows/anas-mcp.yml` (PR `innovation-apps#96`; its cutover checklist is `openspec/changes/migrate-anas-mcp-to-monorepo/tasks.md`).
 
 Note the version ID currently at 100% and its creation time before the monorepo merge, and compare again afterwards. Rolling back is manual only (a previous version may predate Cloudflare Access): never run `wrangler rollback` without an explicit decision.
 
