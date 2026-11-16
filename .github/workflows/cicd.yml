@@ -1,47 +1,37 @@
 name: CI/CD
 
-# Thin caller of the organization-managed Cloudflare Worker pipeline v2 (see docs/cicd.md). It contains no Wrangler,
-# version-upload, deploy or rollback logic. Strategy is `production-only`: every branch push / same-repo PR runs
-# verification only; ONLY a push to `main` deploys Production. No Native Preview, no Shared Dev, no persistent Dev.
+# VERIFICATION ONLY. Deployment ownership of the Cloudflare Worker `anas-mcp` moved to
+# firstsun-dev/innovation-apps (apps/anas-mcp); see docs/cutover.md. This workflow deliberately has no deploy path:
+# no reusable `_cf-worker-v2.yml` call, no Cloudflare credentials, no `wrangler deploy`/`versions` commands (the only
+# Wrangler call is the credential-free `--dry-run` bundle check), and read-only permissions.
 #
-# Deliberately NOT triggered by `workflow_dispatch` (it would deploy Production from main), `delete` (the lifecycle
-# job is skipped for production-only) or `pull_request`: the shared CI jobs need the org's self-hosted runners (the
-# shared setup action expects a pre-installed pnpm; verified to fail on ubuntu-latest), and this repository is public,
-# so a fork PR must never reach them. Only branches of this repository run CI, and only `main` deploys.
+# Triggers: `push` only (same-repo PRs are covered by their branch push). No `pull_request` (public repository),
+# no `workflow_dispatch`, no `schedule`. Runs on GitHub-hosted runners; no secrets are referenced.
 
 on:
-  push: # all branches: verification-only except main (same-repo PRs are covered by their branch push)
+  push:
 
 permissions:
-  contents: write # ceiling required by the callee's (here skipped, release_cmd unset) Release job; the Deploy job itself is contents: read
-  deployments: write # requested by the reusable workflow's Deploy job (Production deployment ledger)
-  pull-requests: write # requested by the reusable workflow's Deploy job
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  cf:
-    # Floating major tag, per owner decision; see docs/cicd.md. The retired `tools_ref` input is intentionally not passed.
-    uses: firstsun-dev/.github/.github/workflows/_cf-worker-v2.yml@v2
-    with:
-      app_name: anas-mcp
-      app_path: .
-      app_version: ${{ github.sha }}
-      deployment_strategy: production-only
-      preview_on_branch_push: false
-      shared_dev_on_branch_push: false
-      wrangler_config: wrangler.jsonc
-      # Aggregate gate (typecheck, Vitest, OpenAPI lint), unchanged from the previous pipeline.
-      test_unit_cmd: pnpm run check
-      # Wrangler bundles the Worker in `versions upload`; this is a credential-free build-validation gate only.
-      build_cmd: pnpm exec wrangler deploy --dry-run
-      app_url_prod: https://mcp.firstsun.org
-      # The Worker has no route at `/` (404); the built-in post-deploy liveness probe requests /health (200) instead.
-      probe_path: /health
-      # Never auto-revert: a previous Worker version may predate Cloudflare Access authentication.
-      production_rollback_policy: manual
-      smoke_cmd: scripts/smoke-prod.sh
-      smoke_env: |
-        BASE_URL=https://mcp.firstsun.org
-        EXPECTED_ISSUER=https://firstsun.cloudflareaccess.com
-    secrets:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  verify:
+    name: Verify (pnpm install, typecheck, tests, OpenAPI, wrangler dry-run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1 (version from packageManager)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - run: pnpm exec wrangler deploy --dry-run
